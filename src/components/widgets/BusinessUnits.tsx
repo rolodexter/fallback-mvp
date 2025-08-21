@@ -35,7 +35,7 @@ const BusinessUnits: React.FC = () => {
         const jsonData = JSON.parse(text);
         setData(jsonData);
       } catch (err) {
-        setError('Error loading business units data');
+        setError(err instanceof Error ? err.message : 'Error loading business units data');
         console.error(err);
       } finally {
         setLoading(false);

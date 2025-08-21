@@ -24,6 +24,7 @@
     "@typescript-eslint/parser": "^6.0.0",
     "@vercel/node": "^5.3.13",
     "@vitejs/plugin-react": "^4.0.3",
+    "msw": "^2.10.5",
     "typescript": "^5.0.2",
     "vite": "^4.4.5"
   },

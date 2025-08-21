@@ -115,11 +115,40 @@ export const chatClient = {
       });
       
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Error: ${response.status} ${response.statusText}`);
+        try {
+          // Try to parse error response as JSON
+          const text = await response.text();
+          let errorMessage = `Error: ${response.status} ${response.statusText}`;
+          
+          if (text && text.trim() !== '') {
+            try {
+              const errorData = JSON.parse(text);
+              if (errorData.error) errorMessage = errorData.error;
+            } catch (e) {
+              // If JSON parsing fails, use the text as error message
+              errorMessage = text;
+            }
+          }
+          throw new Error(errorMessage);
+        } catch (e) {
+          throw new Error(`Error: ${response.status} ${response.statusText}`);
+        }
       }
       
-      return await response.json();
+      // Safely parse response
+      const text = await response.text();
+      if (!text || text.trim() === '') {
+        return { reply: 'Received empty response from server', error: 'Empty response' };
+      }
+      
+      try {
+        return JSON.parse(text);
+      } catch (e) {
+        return { 
+          reply: 'Unable to parse server response', 
+          error: `JSON parse error: ${e instanceof Error ? e.message : 'Unknown parsing error'}` 
+        };
+      }
     } catch (error) {
       console.error('Chat API error:', error);
       return {

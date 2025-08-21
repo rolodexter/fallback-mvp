@@ -27,14 +27,21 @@ const MonthlyTrend: React.FC = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await fetch('/data/monthly_trend_gross_v1.json');
+        // Use absolute URL to ensure correct path in all environments
+        const response = await fetch(window.location.origin + '/data/monthly_trend_gross_v1.json');
         if (!response.ok) {
-          throw new Error('Failed to fetch data');
+          throw new Error(`Failed to fetch data: ${response.status}`);
         }
-        const jsonData = await response.json();
+        // Check for empty response before parsing
+        const text = await response.text();
+        if (!text || text.trim() === '') {
+          throw new Error('Empty response received');
+        }
+        // Parse the JSON safely
+        const jsonData = JSON.parse(text);
         setData(jsonData);
       } catch (err) {
-        setError('Error loading monthly trend data');
+        setError(err instanceof Error ? err.message : 'Error loading monthly trend data');
         console.error(err);
       } finally {
         setLoading(false);
