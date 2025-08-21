@@ -84,3 +84,27 @@
   width: 80px;
   height: 30px;
 }
+
+.widget-summary {
+  display: flex;
+  align-items: center;
+}
+
+.chart-summary {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.summary-label {
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
+.summary-value {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #333;
+}
