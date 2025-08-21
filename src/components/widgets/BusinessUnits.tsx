@@ -58,19 +58,19 @@ const BusinessUnits: React.FC = () => {
         <h3 className="widget-title">{data.title}</h3>
       </div>
       <div className="widget-content">
-          {data.units.map((unit) => (
-            <div key={unit.name} className="data-row">
-              <div className="data-name">{unit.name}</div>
-              <div className="data-values">
-                <div className="data-current">{formatCurrency(unit.current)}</div>
-                <div className="data-previous">{formatCurrency(unit.previous)}</div>
-                <div className={`data-change ${unit.percentChange >= 0 ? 'positive' : 'negative'}`}>
-                  {unit.percentChange >= 0 ? '+' : ''}{unit.percentChange.toFixed(1)}%
-                </div>
-                <div className="data-chart">
-                  <Sparklines data={unit.trend} width={80} height={30}>
-                    <SparklinesLine color={unit.percentChange >= 0 ? '#16a34a' : '#dc2626'} />
-                  </Sparklines>
+        {data.units.map((unit) => (
+          <div key={unit.name} className="data-row">
+            <div className="data-name">{unit.name}</div>
+            <div className="data-values">
+              <div className="data-current">{formatCurrency(unit.current)}</div>
+              <div className="data-previous">{formatCurrency(unit.previous)}</div>
+              <div className={`data-change ${unit.percentChange >= 0 ? 'positive' : 'negative'}`}>
+                {unit.percentChange >= 0 ? '+' : ''}{unit.percentChange.toFixed(1)}%
+              </div>
+              <div className="data-chart">
+                <Sparklines data={unit.trend} width={80} height={30}>
+                  <SparklinesLine color={unit.percentChange >= 0 ? '#16a34a' : '#dc2626'} />
+                </Sparklines>
                 </div>
               </div>
             </div>
