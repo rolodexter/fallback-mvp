@@ -53,13 +53,11 @@ const BusinessUnits: React.FC = () => {
   if (!data) return <div className="widget">No data available</div>;
 
   return (
-    <div className="widget business-units-widget">
-      <h2>Business Units</h2>
+    <div className="widget">
+      <div className="widget-header">
+        <h3 className="widget-title">{data.title}</h3>
+      </div>
       <div className="widget-content">
-        <div className="widget-header">
-          <h3 className="widget-title">{data.title}</h3>
-        </div>
-        <div className="widget-content">
           {data.units.map((unit) => (
             <div key={unit.name} className="data-row">
               <div className="data-name">{unit.name}</div>
