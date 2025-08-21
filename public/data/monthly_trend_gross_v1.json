@@ -1,0 +1,17 @@
+{
+  "title": "Monthly Gross Trend",
+  "months": ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
+  "current_year": {
+    "label": "2025",
+    "values": [2950000, 3120000, 3310000, 3450000, 3580000, 3720000]
+  },
+  "previous_year": {
+    "label": "2024",
+    "values": [2780000, 2910000, 3050000, 3160000, 3280000, 3410000]
+  },
+  "percentChange": 9.09,
+  "summary": {
+    "current": 20130000,
+    "previous": 18590000
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "title": "Top Counterparties",
+  "counterparties": [
+    {
+      "name": "Maersk Shipping",
+      "current": 2430000,
+      "previous": 2250000,
+      "percentChange": 8.0,
+      "trend": [2250000, 2310000, 2350000, 2400000, 2430000]
+    },
+    {
+      "name": "MSC Group",
+      "current": 1950000,
+      "previous": 1820000,
+      "percentChange": 7.14,
+      "trend": [1820000, 1860000, 1890000, 1920000, 1950000]
+    },
+    {
+      "name": "COSCO Shipping",
+      "current": 1680000,
+      "previous": 1790000,
+      "percentChange": -6.15,
+      "trend": [1790000, 1760000, 1730000, 1710000, 1680000]
+    },
+    {
+      "name": "Evergreen Marine",
+      "current": 1420000,
+      "previous": 1340000,
+      "percentChange": 5.97,
+      "trend": [1340000, 1365000, 1390000, 1410000, 1420000]
+    },
+    {
+      "name": "CMA CGM Group",
+      "current": 1280000,
+      "previous": 1320000,
+      "percentChange": -3.03,
+      "trend": [1320000, 1310000, 1295000, 1285000, 1280000]
+    }
+  ]
+}

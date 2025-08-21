@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { Sparklines, SparklinesLine } from 'react-sparklines';
-import './Widget.css';
 
 type BusinessUnit = {
   name: string;
@@ -23,11 +22,17 @@ const BusinessUnits: React.FC = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await fetch('/data/business_units_snapshot_yoy_v1.json');
+        // Make sure we get the full URL from the root
+        const response = await fetch(window.location.origin + '/data/business_units_snapshot_yoy_v1.json');
         if (!response.ok) {
-          throw new Error('Failed to fetch data');
+          throw new Error(`Failed to fetch data: ${response.status}`);
         }
-        const jsonData = await response.json();
+        // Check the content before parsing
+        const text = await response.text();
+        if (!text || text.trim() === '') {
+          throw new Error('Empty response received');
+        }
+        const jsonData = JSON.parse(text);
         setData(jsonData);
       } catch (err) {
         setError('Error loading business units data');
@@ -71,11 +76,10 @@ const BusinessUnits: React.FC = () => {
                 <Sparklines data={unit.trend} width={80} height={30}>
                   <SparklinesLine color={unit.percentChange >= 0 ? '#16a34a' : '#dc2626'} />
                 </Sparklines>
-                </div>
               </div>
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </div>
     </div>
   );

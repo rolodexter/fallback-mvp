@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import { chatClient } from '../../services/chatClient';
 import { routeMessage } from '../../data/router/router';
 import { getTemplateSummaryFunction } from '../../data/templates';
-import './ChatPanel.css';
 
 type MessageType = 'user' | 'bot' | 'error';
 

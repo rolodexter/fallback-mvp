@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import './Widget.css';
 
 type MonthlyTrendData = {
   title: string;

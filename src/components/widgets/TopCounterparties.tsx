@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { Sparklines, SparklinesLine } from 'react-sparklines';
-import './Widget.css';
 
 type Counterparty = {
   name: string;
@@ -53,31 +52,28 @@ const TopCounterparties: React.FC = () => {
   if (!data) return <div className="widget">No data available</div>;
 
   return (
-    <div className="widget top-counterparties-widget">
-      <h2>Top Counterparties</h2>
+    <div className="widget">
+      <div className="widget-header">
+        <h3 className="widget-title">{data.title}</h3>
+      </div>
       <div className="widget-content">
-        <div className="widget-header">
-          <h3 className="widget-title">{data.title}</h3>
-        </div>
-        <div className="widget-content">
-          {data.counterparties.map((cp) => (
-            <div key={cp.name} className="data-row">
-              <div className="data-name">{cp.name}</div>
-              <div className="data-values">
-                <div className="data-current">{formatCurrency(cp.current)}</div>
-                <div className="data-previous">{formatCurrency(cp.previous)}</div>
-                <div className={`data-change ${cp.percentChange >= 0 ? 'positive' : 'negative'}`}>
-                  {cp.percentChange >= 0 ? '+' : ''}{cp.percentChange.toFixed(1)}%
-                </div>
-                <div className="data-chart">
-                  <Sparklines data={cp.trend} width={80} height={30}>
-                    <SparklinesLine color={cp.percentChange >= 0 ? '#16a34a' : '#dc2626'} />
-                  </Sparklines>
-                </div>
+        {data.counterparties.map((cp) => (
+          <div key={cp.name} className="data-row">
+            <div className="data-name">{cp.name}</div>
+            <div className="data-values">
+              <div className="data-current">{formatCurrency(cp.current)}</div>
+              <div className="data-previous">{formatCurrency(cp.previous)}</div>
+              <div className={`data-change ${cp.percentChange >= 0 ? 'positive' : 'negative'}`}>
+                {cp.percentChange >= 0 ? '+' : ''}{cp.percentChange.toFixed(1)}%
+              </div>
+              <div className="data-chart">
+                <Sparklines data={cp.trend} width={80} height={30}>
+                  <SparklinesLine color={cp.percentChange >= 0 ? '#16a34a' : '#dc2626'} />
+                </Sparklines>
               </div>
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </div>
     </div>
   );
