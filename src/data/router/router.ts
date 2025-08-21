@@ -68,6 +68,7 @@ export function routeMessage(message: string): RouterResult {
   if (typeof window !== 'undefined' && window.__riskillDebug) {
     window.__riskillDebug.routerDomain = highestDomain;
     window.__riskillDebug.routerConfidence = highestScore;
+    window.__riskillDebug.templateId = highestDomain !== 'none' ? highestDomain : '';
   }
 
   return { domain: highestDomain, confidence: highestScore };

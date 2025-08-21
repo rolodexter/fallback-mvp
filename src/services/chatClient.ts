@@ -20,6 +20,9 @@ declare global {
     __riskillDebug: {
       endpoint: string;
       platform: string;
+      routerDomain?: string;
+      routerConfidence?: number;
+      templateId?: string;
     };
   }
 }

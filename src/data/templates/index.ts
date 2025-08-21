@@ -3,15 +3,15 @@
  * These functions provide summary information for different domains
  */
 
-export function performanceSummary(data: any) { 
+export function performanceSummary(_data?: any) { 
   return "YoY performance is stable (mock)."; 
 }
 
-export function counterpartySummary(data: any) { 
+export function counterpartySummary(_data?: any) { 
   return "Top counterparties: ACME, Globex (mock)."; 
 }
 
-export function riskSummary(data: any) { 
+export function riskSummary(_data?: any) { 
   return "No major risks flagged (mock)."; 
 }
 
