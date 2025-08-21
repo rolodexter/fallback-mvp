@@ -1,0 +1,17 @@
+{
+  "performance": {
+    "schemaId": "perf_v1",
+    "summaryFn": "performanceSummary",
+    "groundingNarrativeId": "performance_intro"
+  },
+  "counterparties": {
+    "schemaId": "cp_v1",
+    "summaryFn": "counterpartySummary",
+    "groundingNarrativeId": "counterparty_intro"
+  },
+  "risk": {
+    "schemaId": "risk_v1",
+    "summaryFn": "riskSummary",
+    "groundingNarrativeId": "risk_intro"
+  }
+}
