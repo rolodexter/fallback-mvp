@@ -1,0 +1,33 @@
+{
+  "title": "Business Units Performance",
+  "units": [
+    {
+      "name": "Liferafts",
+      "current": 4215000,
+      "previous": 3890000,
+      "percentChange": 8.35,
+      "trend": [3850000, 3920000, 4050000, 4150000, 4215000]
+    },
+    {
+      "name": "Firefighting",
+      "current": 3120000,
+      "previous": 3435000,
+      "percentChange": -9.17,
+      "trend": [3435000, 3350000, 3280000, 3190000, 3120000]
+    },
+    {
+      "name": "Navigation",
+      "current": 2890000,
+      "previous": 2650000,
+      "percentChange": 9.06,
+      "trend": [2650000, 2710000, 2760000, 2820000, 2890000]
+    },
+    {
+      "name": "Certification",
+      "current": 1750000,
+      "previous": 1680000,
+      "percentChange": 4.17,
+      "trend": [1680000, 1695000, 1720000, 1740000, 1750000]
+    }
+  ]
+}
