@@ -6,6 +6,7 @@
 
 import { detectTopic } from "../data/router/router";
 import { runTemplate } from "../data/templates";
+import { executeBigQuery } from "./bigQueryClient";
 
 // Request and response type definitions
 type ChatResponse = {
@@ -24,6 +25,7 @@ export type GroundingPayload = {
   groundingType: "intro" | "drilldown" | "no_data" | null;
   kpiSummary?: string | null;
   templateOutput?: string | null;
+  bigQueryData?: any[] | null;
 };
 
 // Debug info container for development purposes
@@ -106,35 +108,78 @@ export const chatClient = {
   },
 
   /**
-   * Build a grounded request payload with domain detection and template output
+   * Build a grounded request payload with domain detection, BigQuery data, and template output
    * @param userText The user message
    * @param history Array of previous messages in the conversation
    * @returns A grounded request payload
    */
   async buildGroundedRequest(userText: string, history: Array<{role: "user" | "assistant", content: string}> = []) {
-    // Get the store snapshot (would normally come from Zustand or similar)
-    const store = {}; // Replace with actual store if available
-    
     // Detect the topic from the user message
     const detection = detectTopic(userText);
     
-    // Run the template for the detected domain
-    const tmpl = detection?.domain ? runTemplate(detection.domain, store) : { kpiSummary: null, templateOutput: null };
+    let bigQueryData = null;
+    let groundingType = detection?.groundingType ?? null;
+    let tmpl: { kpiSummary: string | null, templateOutput: string | null } = { kpiSummary: null, templateOutput: null };
+    
+    // Get BigQuery data if we have a valid domain
+    if (detection?.domain && detection.domain !== 'none') {
+      try {
+        // Map domain to BigQuery template ID
+        const templateMap: Record<string, string> = {
+          'performance': 'business_units_snapshot_yoy_v1',
+          'counterparties': 'customers_top_n',
+          'risk': 'risks_summary'
+        };
+        
+        const templateId = templateMap[detection.domain];
+        
+        if (templateId) {
+          // Execute BigQuery query based on domain
+          let params = {};
+          
+          // Set parameters based on user query
+          if (templateId === 'customers_top_n') {
+            params = { limit: 5 };
+          }
+          
+          // Get data from BigQuery
+          const response = await executeBigQuery(templateId, params);
+          
+          if (response.success && response.rows && response.rows.length > 0) {
+            // Store BigQuery data for grounding
+            bigQueryData = response.rows;
+          } else {
+            // No data or error, set grounding type to no_data
+            groundingType = 'no_data';
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching BigQuery data:', error);
+        groundingType = 'no_data';
+      }
+    }
+    
+    // Get the template output
+    const store = {}; // Replace with actual store if available
+    if (detection?.domain) {
+      tmpl = await runTemplate(detection.domain, store);
+    }
     
     // Build the grounding payload
     const grounding: GroundingPayload = {
       domain: detection?.domain ?? null,
       confidence: detection?.confidence ?? 0,
-      groundingType: detection?.groundingType ?? null,
+      groundingType: groundingType,
       kpiSummary: tmpl?.kpiSummary ?? null,
       templateOutput: tmpl?.templateOutput ?? null,
+      bigQueryData: bigQueryData
     };
     
     // Update debug info if available
     if (typeof window !== 'undefined' && window.__riskillDebug) {
       window.__riskillDebug.routerDomain = detection?.domain ?? '';
       window.__riskillDebug.routerConfidence = detection?.confidence ?? 0;
-      window.__riskillDebug.routerGroundingType = detection?.groundingType ? String(detection.groundingType) : '';
+      window.__riskillDebug.routerGroundingType = groundingType ? String(groundingType) : '';
     }
     
     return {
@@ -217,7 +262,7 @@ export const chatClient = {
    * Legacy method for backward compatibility
    * @deprecated Use sendChat instead
    */
-  async sendMessage(message: string): Promise<ChatResponse> {
+  async sendMessage(message: string, _domain?: string): Promise<ChatResponse> {
     console.warn('sendMessage is deprecated, use sendChat instead');
     return this.sendChat(message, []);
   }
