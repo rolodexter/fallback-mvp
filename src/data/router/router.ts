@@ -5,13 +5,21 @@
 
 import keywords from './keywords.json';
 
+// Global debug interface is defined in src/services/chatClient.ts
+
 export type RouterResult = {
   domain: string;
   confidence: number;
 };
 
+export type TopicDetectionResult = {
+  domain: string;
+  confidence: number;
+  groundingType: "intro" | "drilldown" | "no_data" | null;
+};
+
 /**
- * Simple router implementation that scores domain matches based on keyword presence
+ * Route a message to a specific domain based on keyword matching
  * @param message The user message to analyze
  * @returns Object with domain and confidence score
  */
@@ -72,4 +80,48 @@ export function routeMessage(message: string): RouterResult {
   }
 
   return { domain: highestDomain, confidence: highestScore };
+}
+
+/**
+ * Detect the topic and grounding type from a user message
+ * @param message The user message to analyze
+ * @returns Object with domain, confidence, and groundingType
+ */
+export function detectTopic(message: string): TopicDetectionResult {
+  // Get the basic domain detection
+  const { domain, confidence } = routeMessage(message);
+  
+  // Default to intro for high-level questions, drilldown for specifics
+  let groundingType: "intro" | "drilldown" | "no_data" | null = null;
+  
+  if (domain === 'none') {
+    return { domain, confidence, groundingType: null };
+  }
+  
+  const messageLower = message.toLowerCase();
+  
+  // Determine grounding type based on message content
+  if (
+    messageLower.includes('trend') ||
+    messageLower.includes('compare') ||
+    messageLower.includes('versus') ||
+    messageLower.includes('vs') ||
+    messageLower.includes('detail') ||
+    messageLower.includes('specific') ||
+    messageLower.match(/how (much|many)/) ||
+    messageLower.includes('numbers') ||
+    messageLower.includes('statistics')
+  ) {
+    groundingType = 'drilldown';
+  } else {
+    // Default to intro for more general questions
+    groundingType = 'intro';
+  }
+  
+  // Update debug info
+  if (typeof window !== 'undefined' && window.__riskillDebug) {
+    window.__riskillDebug.routerGroundingType = groundingType;
+  }
+  
+  return { domain, confidence, groundingType };
 }
