@@ -80,10 +80,11 @@ export async function executeBigQuery(
     
     // Add debug information if available
     if (typeof window !== 'undefined' && window.__riskillDebug) {
-      window.__riskillDebug.bigQueryTemplateId = templateId;
-      window.__riskillDebug.bigQueryParams = params;
-      window.__riskillDebug.bigQuerySuccess = result.success;
-      window.__riskillDebug.bigQueryRows = result.rows?.length || 0;
+      // Extend the debug object with BigQuery properties if needed
+      (window.__riskillDebug as any).bigQueryTemplateId = templateId;
+      (window.__riskillDebug as any).bigQueryParams = params;
+      (window.__riskillDebug as any).bigQuerySuccess = result.success;
+      (window.__riskillDebug as any).bigQueryRows = result.rows?.length || 0;
     }
     
     return result;
@@ -96,7 +97,7 @@ export async function executeBigQuery(
       rows: [],
       diagnostics: {
         message: 'Failed to execute BigQuery',
-        error: error.message,
+        error: error instanceof Error ? error.message : String(error),
         template_id: templateId,
         params,
       },
@@ -117,6 +118,10 @@ export function mapDomainToTemplateId(domain: string): string {
       return 'customers_top_n';
     case 'risk':
       return 'risks_summary';
+    case 'profitability':
+      return 'profitability_by_business_unit_v1';
+    case 'regional':
+      return 'regional_revenue_trend_24m_v1';
     default:
       throw new Error(`Unsupported domain: ${domain}`);
   }

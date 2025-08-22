@@ -2,6 +2,7 @@ import { BigQuery } from '@google-cloud/bigquery';
 import { Handler } from '@netlify/functions';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getCache, generateStableHash } from '../src/lib/cache';
 
 // Initialize BigQuery client
 const bigquery = new BigQuery();
@@ -20,6 +21,10 @@ interface BigQueryResponse {
     template_id?: string;
     params?: Record<string, any>;
     query?: string;
+    bytesProcessed?: number;
+    jobId?: string;
+    cacheHit?: boolean;
+    executionTime?: number;
   };
 }
 
@@ -66,14 +71,52 @@ const executeBigQuery = async (
   params: Record<string, any> = {}
 ): Promise<BigQueryResponse> => {
   try {
+    // Initialize cache
+    const cache = await getCache();
+    
+    // Generate stable cache key from template_id and params
+    const paramsHash = generateStableHash(params);
+    const cacheKey = `bq:${templateId}:${paramsHash}`;
+    
+    // Try to get from cache first
+    const cachedResult = await cache.get(cacheKey);
+    
+    if (cachedResult) {
+      console.log(`Cache hit for ${templateId}`);
+      return {
+        success: true,
+        rows: cachedResult,
+        diagnostics: {
+          template_id: templateId,
+          params,
+          cacheHit: true
+        }
+      };
+    }
+    
+    console.log(`Cache miss for ${templateId}, executing query`);
+    
     // Get SQL template
     const sqlTemplate = readSqlTemplate(templateId);
     
     // Prepare SQL with parameters
     const sqlQuery = prepareSql(sqlTemplate, params);
     
-    // Execute query
-    const [rows] = await bigquery.query({ query: sqlQuery });
+    // Add query options with limits
+    const startTime = Date.now();
+    const [rows, metadata] = await bigquery.query({ 
+      query: sqlQuery,
+      maximumBytesBilled: '1073741824', // 1 GB limit
+      timeoutMs: 15000 // 15 second timeout
+    });
+    const executionTime = Date.now() - startTime;
+    
+    // Get statistics if available
+    const bytesProcessed = metadata?.statistics?.totalBytesProcessed || 0;
+    const jobId = metadata?.statistics?.jobId || '';
+    
+    // Store in cache (default TTL is 900 seconds / 15 minutes)
+    await cache.set(cacheKey, rows);
     
     return {
       success: true,
@@ -81,7 +124,11 @@ const executeBigQuery = async (
       diagnostics: {
         template_id: templateId,
         params,
-        query: sqlQuery
+        query: sqlQuery,
+        bytesProcessed,
+        jobId,
+        cacheHit: false,
+        executionTime
       }
     };
   } catch (error) {

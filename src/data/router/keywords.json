@@ -1,5 +1,7 @@
 {
   "performance": ["performance","YoY","growth","business units"],
   "counterparties": ["counterparties","clients","partners","buyers"],
-  "risk": ["risk","exposure","vulnerabilities","loss"]
+  "risk": ["risk","exposure","vulnerabilities","loss"],
+  "profitability": ["profit", "margin", "gross margin", "profitability", "costs", "cogs", "earnings"],
+  "regional": ["region", "by region", "Buenos Aires", "Patagonia", "AMBA", "regional", "geography"]
 }

@@ -128,7 +128,9 @@ export const chatClient = {
         const templateMap: Record<string, string> = {
           'performance': 'business_units_snapshot_yoy_v1',
           'counterparties': 'customers_top_n',
-          'risk': 'risks_summary'
+          'risk': 'risks_summary',
+          'profitability': 'profitability_by_business_unit_v1',
+          'regional': 'regional_revenue_trend_24m_v1'
         };
         
         const templateId = templateMap[detection.domain];
@@ -140,6 +142,11 @@ export const chatClient = {
           // Set parameters based on user query
           if (templateId === 'customers_top_n') {
             params = { limit: 5 };
+          } else if (templateId === 'profitability_by_business_unit_v1') {
+            const currentYear = new Date().getFullYear();
+            params = { year: currentYear - 1 };
+          } else if (templateId === 'regional_revenue_trend_24m_v1') {
+            params = {}; // No parameters needed, but could add region filter if specified in message
           }
           
           // Get data from BigQuery

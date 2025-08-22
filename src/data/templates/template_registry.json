@@ -13,5 +13,15 @@
     "schemaId": "risk_v1",
     "summaryFn": "riskSummary",
     "groundingNarrativeId": "risk_intro"
+  },
+  "profitability": {
+    "schemaId": "profit_v1",
+    "summaryFn": "profitabilitySummary",
+    "groundingNarrativeId": "profitability_intro"
+  },
+  "regional": {
+    "schemaId": "region_v1",
+    "summaryFn": "regionalSummary",
+    "groundingNarrativeId": "regional_intro"
   }
 }
