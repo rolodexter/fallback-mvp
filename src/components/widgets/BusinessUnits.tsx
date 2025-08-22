@@ -1,6 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { Sparklines, SparklinesLine } from 'react-sparklines';
+import { executeBigQuery } from '../../services/bigQueryClient';
 
+// Type definition for BigQuery business unit data
+type BigQueryBusinessUnit = {
+  business_unit: string;
+  revenue_this_year: number;
+  revenue_last_year: number;
+  yoy_growth_pct: number;
+};
+
+// Type definition for the processed business unit data
 type BusinessUnit = {
   name: string;
   current: number;
@@ -22,21 +32,64 @@ const BusinessUnits: React.FC = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Make sure we get the full URL from the root
-        const response = await fetch(window.location.origin + '/data/business_units_snapshot_yoy_v1.json');
-        if (!response.ok) {
-          throw new Error(`Failed to fetch data: ${response.status}`);
+        // First try to get data from BigQuery
+        const response = await executeBigQuery('business_units_snapshot_yoy_v1');
+        
+        if (response.success && response.rows?.length) {
+          // Transform BigQuery data to the expected format
+          const businessUnits = response.rows as BigQueryBusinessUnit[];
+          
+          // Sort by revenue (current year)
+          const sortedUnits = [...businessUnits].sort(
+            (a, b) => b.revenue_this_year - a.revenue_this_year
+          );
+          
+          // Process into the format expected by the component
+          const processedUnits = sortedUnits.map(unit => {
+            // Generate simple trend data (could be enhanced with actual time series data)
+            const trendStart = unit.revenue_last_year * 0.9;
+            const trendEnd = unit.revenue_this_year;
+            const trendStep = (trendEnd - trendStart) / 4;
+            const trend = [
+              trendStart,
+              trendStart + trendStep,
+              trendStart + trendStep * 2,
+              trendStart + trendStep * 3,
+              trendEnd,
+            ];
+            
+            return {
+              name: unit.business_unit,
+              current: unit.revenue_this_year,
+              previous: unit.revenue_last_year,
+              percentChange: unit.yoy_growth_pct,
+              trend
+            };
+          });
+          
+          setData({
+            title: "Business Unit Performance",
+            units: processedUnits
+          });
+        } else {
+          // Fallback to static data
+          const fallbackResponse = await fetch(window.location.origin + '/data/business_units_snapshot_yoy_v1.json');
+          if (!fallbackResponse.ok) {
+            throw new Error(`Failed to fetch fallback data: ${fallbackResponse.status}`);
+          }
+          const text = await fallbackResponse.text();
+          if (!text || text.trim() === '') {
+            throw new Error('Empty fallback response received');
+          }
+          const jsonData = JSON.parse(text);
+          setData(jsonData);
+          
+          // Log that we're using fallback data
+          console.log('Using fallback data for Business Units - BigQuery failed:', response.diagnostics?.error);
         }
-        // Check the content before parsing
-        const text = await response.text();
-        if (!text || text.trim() === '') {
-          throw new Error('Empty response received');
-        }
-        const jsonData = JSON.parse(text);
-        setData(jsonData);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Error loading business units data');
-        console.error(err);
+        console.error('Business Units widget error:', err);
       } finally {
         setLoading(false);
       }

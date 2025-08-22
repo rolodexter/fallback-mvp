@@ -1,5 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { executeBigQuery } from '../../services/bigQueryClient';
+
+// Type definition for BigQuery monthly trend data
+type BigQueryMonthlyData = {
+  month: string;
+  month_num: number;
+  revenue_current_year: number;
+  revenue_previous_year: number;
+};
 
 type MonthlyTrendData = {
   title: string;
@@ -27,22 +36,69 @@ const MonthlyTrend: React.FC = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Use absolute URL to ensure correct path in all environments
-        const response = await fetch(window.location.origin + '/data/monthly_trend_gross_v1.json');
-        if (!response.ok) {
-          throw new Error(`Failed to fetch data: ${response.status}`);
+        // First try to get data from BigQuery
+        const response = await executeBigQuery('monthly_trends_v1');
+        
+        if (response.success && response.rows?.length) {
+          // Transform BigQuery data to the expected format
+          const monthlyData = response.rows as BigQueryMonthlyData[];
+          
+          // Sort by month number
+          const sortedData = [...monthlyData].sort((a, b) => a.month_num - b.month_num);
+          
+          // Extract month names, current year values, and previous year values
+          const months = sortedData.map(item => item.month);
+          const currentYearValues = sortedData.map(item => item.revenue_current_year);
+          const previousYearValues = sortedData.map(item => item.revenue_previous_year);
+          
+          // Calculate totals and percent change
+          const currentTotal = currentYearValues.reduce((sum, value) => sum + value, 0);
+          const previousTotal = previousYearValues.reduce((sum, value) => sum + value, 0);
+          const percentChange = ((currentTotal - previousTotal) / previousTotal) * 100;
+          
+          // Get the current year and previous year (can be retrieved from the first data point)
+          const currentYear = new Date().getFullYear().toString();
+          const previousYear = (new Date().getFullYear() - 1).toString();
+          
+          // Create the formatted data object
+          const formattedData: MonthlyTrendData = {
+            title: "Monthly Revenue Trends",
+            months: months,
+            current_year: {
+              label: currentYear,
+              values: currentYearValues
+            },
+            previous_year: {
+              label: previousYear,
+              values: previousYearValues
+            },
+            percentChange: percentChange,
+            summary: {
+              current: currentTotal,
+              previous: previousTotal
+            }
+          };
+          
+          setData(formattedData);
+        } else {
+          // Fallback to static data
+          const fallbackResponse = await fetch(window.location.origin + '/data/monthly_trend_gross_v1.json');
+          if (!fallbackResponse.ok) {
+            throw new Error(`Failed to fetch fallback data: ${fallbackResponse.status}`);
+          }
+          const text = await fallbackResponse.text();
+          if (!text || text.trim() === '') {
+            throw new Error('Empty fallback response received');
+          }
+          const jsonData = JSON.parse(text);
+          setData(jsonData);
+          
+          // Log that we're using fallback data
+          console.log('Using fallback data for Monthly Trends - BigQuery failed:', response.diagnostics?.error);
         }
-        // Check for empty response before parsing
-        const text = await response.text();
-        if (!text || text.trim() === '') {
-          throw new Error('Empty response received');
-        }
-        // Parse the JSON safely
-        const jsonData = JSON.parse(text);
-        setData(jsonData);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Error loading monthly trend data');
-        console.error(err);
+        console.error('Monthly Trend widget error:', err);
       } finally {
         setLoading(false);
       }

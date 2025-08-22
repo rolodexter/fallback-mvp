@@ -1,6 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { Sparklines, SparklinesLine } from 'react-sparklines';
+import { executeBigQuery } from '../../services/bigQueryClient';
 
+// Type definition for BigQuery counterparty data
+type BigQueryCounterparty = {
+  counterparty_name: string;
+  revenue_amount: number;
+  revenue_percent: number;
+  yoy_change_pct: number;
+};
+
+// Type for the processed counterparty data
 type Counterparty = {
   name: string;
   current: number;
@@ -22,22 +32,64 @@ const TopCounterparties: React.FC = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Use absolute URL to ensure correct path in all environments
-        const response = await fetch(window.location.origin + '/data/top_counterparties_gross_v1.json');
-        if (!response.ok) {
-          throw new Error(`Failed to fetch data: ${response.status}`);
+        // First try to get data from BigQuery
+        const response = await executeBigQuery('customers_top_n', { limit: 5 });
+        
+        if (response.success && response.rows?.length) {
+          // Transform BigQuery data to the expected format
+          const counterparties = response.rows as BigQueryCounterparty[];
+          
+          // Process into the format expected by the component
+          const processedCounterparties = counterparties.map(cp => {
+            // Calculate previous year revenue based on current and YoY change
+            const current = cp.revenue_amount;
+            const percentChange = cp.yoy_change_pct;
+            const previous = current / (1 + (percentChange / 100));
+            
+            // Generate simple trend data (could be enhanced with actual time series data)
+            const trendStart = previous * 0.9;
+            const trendEnd = current;
+            const trendStep = (trendEnd - trendStart) / 4;
+            const trend = [
+              trendStart,
+              trendStart + trendStep,
+              trendStart + trendStep * 2,
+              trendStart + trendStep * 3,
+              trendEnd,
+            ];
+            
+            return {
+              name: cp.counterparty_name,
+              current,
+              previous,
+              percentChange,
+              trend
+            };
+          });
+          
+          setData({
+            title: "Top Counterparties",
+            counterparties: processedCounterparties
+          });
+        } else {
+          // Fallback to static data
+          const fallbackResponse = await fetch(window.location.origin + '/data/top_counterparties_gross_v1.json');
+          if (!fallbackResponse.ok) {
+            throw new Error(`Failed to fetch fallback data: ${fallbackResponse.status}`);
+          }
+          const text = await fallbackResponse.text();
+          if (!text || text.trim() === '') {
+            throw new Error('Empty fallback response received');
+          }
+          const jsonData = JSON.parse(text);
+          setData(jsonData);
+          
+          // Log that we're using fallback data
+          console.log('Using fallback data for Top Counterparties - BigQuery failed:', response.diagnostics?.error);
         }
-        // Check for empty response before parsing
-        const text = await response.text();
-        if (!text || text.trim() === '') {
-          throw new Error('Empty response received');
-        }
-        // Parse the JSON safely
-        const jsonData = JSON.parse(text);
-        setData(jsonData);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Error loading counterparties data');
-        console.error(err);
+        console.error('Top Counterparties widget error:', err);
       } finally {
         setLoading(false);
       }
