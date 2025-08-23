@@ -42,9 +42,9 @@ const testCases = [
 console.log('Starting smoke tests with DATA_MODE=mock');
 console.log('POLISH_NARRATIVE:', process.env.POLISH_NARRATIVE || 'false');
 
-// Test Netlify endpoint (using environment variable if set)
+// Test endpoint (using environment variable if set)
 const endpoints = [
-  { name: 'Netlify', url: process.env.CHAT_NETLIFY_URL || 'http://localhost:8888/.netlify/functions/chat' }
+  { name: 'Vercel', url: process.env.CHAT_ENDPOINT || 'https://fallback-mvp.vercel.app/api/chat' }
 ];
 
 // Run tests sequentially
