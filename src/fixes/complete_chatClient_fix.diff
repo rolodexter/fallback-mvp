@@ -1,0 +1,45 @@
+--- a/src/services/chatClient.ts
++++ b/src/services/chatClient.ts
+@@ -443,29 +443,8 @@ export const chatClient = {
+       return { 
+         text: data.text || data.reply || 'No response from server',
+         mode: data.mode || 'chat'
+-      };
+-        return { text: 'Received empty response from server', error: 'Empty response' };
+-      }
+-      
+-      try {
+-        return JSON.parse(text);
+-      } catch (e) {
+-        return { 
+-          text: 'Unable to parse server response', 
+-          error: `JSON parse error: ${e instanceof Error ? e.message : 'Unknown parsing error'}` 
+-        };
+-      }
+-    } catch (error) {
+-      console.error('[ChatClient] Chat API error:', error);
+-      return {
+-        text: 'Service unavailable. Please try again later.',
+-        error: error instanceof Error ? error.message : 'Unknown error occurred',
+-        meta: {
+-          domain: null,
+-          confidence: 0,
+-          groundingType: 'no_data'
+-        },
+-        mode: 'nodata',
+-        reason: 'network_error'
++      };
++    } catch (error) {
++      console.error('[ChatClient] Chat API error:', error);
++      return {
++        text: 'Service unavailable. Please try again later.',
++        error: error instanceof Error ? error.message : 'Unknown error occurred',
++        meta: {
++          domain: null,
++          confidence: 0,
++          groundingType: 'no_data'
++        },
++        mode: 'nodata',
++        reason: 'network_error'
+       };
+     }
