@@ -199,7 +199,7 @@ export default async function handler(
         if (process.env.POLISH_NARRATIVE === 'true') {
           try {
             const polishingPrompt = `Rewrite this text for clarity. Do not change numbers, KPIs, or fields. Here's the text:\n\n${templateOutput}`;
-            const polishedText = await callLLMProvider(polishingPrompt, [], 'You are an editor helping to improve text clarity while preserving all facts and figures exactly as provided.', process.env.PERPLEXITY_API_KEY);
+            const polishedText = await callLLMProvider(polishingPrompt, 'You are an editor helping to improve text clarity while preserving all facts and figures exactly as provided.', [], null, null);
             
             if (polishedText) {
               responseText = polishedText;
@@ -220,7 +220,7 @@ KPI SUMMARY:\n${kpiSummary || 'No KPI summary available.'}
 TEMPLATE OUTPUT:\n${templateOutput}`;
         
         // Call LLM provider
-        responseText = await callLLMProvider(message, history, systemPrompt, process.env.PERPLEXITY_API_KEY);
+        responseText = await callLLMProvider(message, systemPrompt, history, null, domain);
       }
     } else if (bigQueryData) {
       // Format BigQuery results
@@ -230,13 +230,13 @@ TEMPLATE OUTPUT:\n${templateOutput}`;
 BIGQUERY DATA:\n${resultsText}`;
       
       // Call LLM provider
-      responseText = await callLLMProvider(message, history, systemPrompt, process.env.PERPLEXITY_API_KEY);
+      responseText = await callLLMProvider(message, systemPrompt, [], bigQueryData, domain);
     } else {
       // Generic prompt when no grounding
       systemPrompt = `You are Riskill, a financial data analysis assistant. Answer questions about financial KPIs and business metrics. If you don't know the answer, say "I don't have that information available." DO NOT make up data.`;
       
       // Call LLM provider
-      responseText = await callLLMProvider(message, history, systemPrompt, process.env.PERPLEXITY_API_KEY);
+      responseText = await callLLMProvider(message, systemPrompt, [], null, null);
     }
     
     // Extract widgets from template data if available
@@ -269,13 +269,15 @@ BIGQUERY DATA:\n${resultsText}`;
     
   } catch (error) {
     console.error('Error processing request:', error);
-    let errorMessage = 'Error processing your request';
+    // Error message for logging only
+    const logErrorMessage = 'Error processing your request';
     
     if (error instanceof Error) {
       console.error(error.message);
       // Don't expose sensitive error details to the client
       if (process.env.NODE_ENV === 'development') {
-        errorMessage = `Development error: ${error.message}`;
+        // Log development error
+      console.error(`Development error: ${error.message}`);
       }
     }
     
