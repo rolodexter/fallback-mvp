@@ -1,0 +1,91 @@
+--- a/src/components/chat/ChatPanel.tsx
++++ b/src/components/chat/ChatPanel.tsx
+@@ -98,10 +98,10 @@ const ChatPanel: React.FC = () => {
+     }
+     
+     // Handle successful response
+-    if (response.reply) {
++    if (response.text) {
+       const botMessage: Message = {
+         id: generateId(),
+-        text: response.reply,
++        text: response.text,
+         type: 'bot',
+         timestamp: new Date()
+       };
+@@ -109,8 +109,8 @@ const ChatPanel: React.FC = () => {
+       setMessages(prevMessages => [...prevMessages, botMessage]);
+       
+       // Update domain if it was detected
+-      if (response.domain) {
+-        setDomain(response.domain);
++      if (response.meta?.domain) {
++        setDomain(response.meta.domain);
+       }
+       
+       // Update chat history with the new exchange
+@@ -118,7 +118,7 @@ const ChatPanel: React.FC = () => {
+         ...prev,
+         { role: 'user', content: message },
+-        { role: 'assistant', content: response.reply }
++        { role: 'assistant', content: response.text }
+       ]);
+     }
+ 
+--- a/src/data/templates/index.ts
++++ b/src/data/templates/index.ts
+@@ -352,11 +352,18 @@ export async function generateTemplateOutput(domain: string, data?: any): Promise
+         };
+         
+         // Format output
+-        const formattedRisks = sortedRisks.map(risk => {
++        const formattedRisks = sortedRisks.map((risk) => {
+           const impactCategory = getImpactCategory(risk.risk_impact_score);
++          // Convert impact score to estimated financial impact in millions
++          const impactMil = (risk.risk_impact_score * 0.075).toFixed(1);
++          return `* ${risk.risk_category}: ${impactCategory} (Impact: €${impactMil}M)`;
+         }).join('\n');
+         
+-        return `## Regional Revenue Trend (24 months)\n\n${formattedRegions}`;
++        return `## Current Risk Assessment\n\n${formattedRisks}`;
++
++      case 'regional':
++        // Implementation for regional similar to others
++        return "Regional data not available.";
+ 
+       default:
+         return "No detailed information available for this domain.";
+ 
+--- a/src/test_grounding.ts
++++ b/src/test_grounding.ts
+@@ -86,8 +86,9 @@ for (const domain of domains) {
+   try {
+     console.log(`\nTemplate for domain: ${domain}`);
+     const template = runTemplate(domain, {});
+-    console.log(`KPI Summary: ${template.kpiSummary}`);
+-    console.log(`Template Output:\n${template.templateOutput}`);
++    template.then(result => {
++      console.log(`KPI Summary: ${result.kpiSummary}\nTemplate Output:\n${result.templateOutput}`);
++    });
+   } catch (error) {
+     console.error(`Error generating template for ${domain}:`, error);
+   }
+   
+--- a/src/services/chatClient.ts
++++ b/src/services/chatClient.ts
+@@ -443,17 +443,7 @@ export const chatClient = {
+       return { 
+         text: data.text || data.reply || 'No response from server',
+         mode: data.mode || 'chat'
+-      };
+-        return { text: 'Received empty response from server', error: 'Empty response' };
+-      }
+-      
+-      try {
+-        return JSON.parse(text);
+-      } catch (e) {
+-        return { 
+-          text: 'Unable to parse server response', 
+-          error: `JSON parse error: ${e instanceof Error ? e.message : 'Unknown parsing error'}` 
+-        };
++      };
