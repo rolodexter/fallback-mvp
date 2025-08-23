@@ -354,9 +354,16 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
         // Format output
         const formattedRisks = sortedRisks.map(risk => {
           const impactCategory = getImpactCategory(risk.risk_impact_score);
+          // Convert impact score to estimated financial impact in millions
+          const impactMil = (risk.risk_impact_score * 0.075).toFixed(1);
+          return `* ${risk.risk_category}: ${impactCategory} (Impact: €${impactMil}M)`;
         }).join('\n');
         
-        return `## Regional Revenue Trend (24 months)\n\n${formattedRegions}`;
+        return `## Current Risk Assessment\n\n${formattedRisks}`;
+
+      case 'regional':
+        // Implementation for regional similar to others
+        return "Regional data not available.";
 
       default:
         return "No detailed information available for this domain.";

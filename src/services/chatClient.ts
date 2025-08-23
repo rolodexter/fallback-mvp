@@ -444,17 +444,6 @@ export const chatClient = {
         text: data.text || data.reply || 'No response from server',
         mode: data.mode || 'chat'
       };
-        return { text: 'Received empty response from server', error: 'Empty response' };
-      }
-      
-      try {
-        return JSON.parse(text);
-      } catch (e) {
-        return { 
-          text: 'Unable to parse server response', 
-          error: `JSON parse error: ${e instanceof Error ? e.message : 'Unknown parsing error'}` 
-        };
-      }
     } catch (error) {
       console.error('[ChatClient] Chat API error:', error);
       return {
