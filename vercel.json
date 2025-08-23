@@ -1,5 +1,5 @@
 {
-  "buildCommand": "chmod +x vercel-build.sh && ./vercel-build.sh",
+  "buildCommand": "node ./node_modules/vite/bin/vite.js build",
   "outputDirectory": "dist",
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
