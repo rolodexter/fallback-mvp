@@ -117,7 +117,10 @@ const ChatPanel: React.FC = () => {
       // Send message to API with routing context
       const response = await chatClient.sendChat({
         message,
-        chatHistory,
+        chatHistory: chatHistory.map(entry => ({
+          type: entry.role === 'user' ? 'user' : 'bot',
+          text: entry.content
+        })),
         router: routeResult,
         template: nextDomain
       });
