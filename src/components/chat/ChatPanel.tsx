@@ -12,9 +12,16 @@ type Message = {
   timestamp: Date;
 };
 
+// Chat history format required by chatClient.sendChat
+type ChatHistoryEntry = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
 const ChatPanel: React.FC = () => {
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
+  const [chatHistory, setChatHistory] = useState<ChatHistoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [domain, setDomain] = useState<string | undefined>(undefined);
   const [routerConfidence, setRouterConfidence] = useState<number>(0);
@@ -70,38 +77,56 @@ const ChatPanel: React.FC = () => {
 
     // Route the message to determine domain
     const routeResult = routeMessage(message);
-    const newDomain = routeResult.domain !== 'none' ? routeResult.domain : domain;
+    setRouterConfidence(routeResult.confidence);
+    const nextDomain = routeResult.domain !== 'none' ? routeResult.domain : undefined;
+    
+    // Add strict client fallback for non-domain messages
+    if (!nextDomain || routeResult.domain === 'none') {
+      console.info('[ChatPanel] No domain detected, showing intro/nodata locally');
+      
+      // Show intro/nodata locally and return
+      const introMessage: Message = {
+        id: generateId(),
+        text: "Try asking about Business Units (YoY), Top Counterparties, or Monthly Gross Trend.",
+        type: 'bot',
+        timestamp: new Date()
+      };
+      
+      setMessages(prev => [...prev, userMessage, introMessage]);
+      setMessage('');
+      return;
+    }
     
     // Get template if domain is valid
-    if (newDomain && newDomain !== 'none') {
-      const templateFn = getTemplateSummaryFunction(newDomain);
+    if (nextDomain) {
+      const templateFn = getTemplateSummaryFunction(nextDomain);
       if (templateFn) {
         // Use template function for future summary display
-        setTemplateId(newDomain);
+        setTemplateId(nextDomain);
       }
     }
     
-    // Update confidence
-    setRouterConfidence(routeResult.confidence);
-    
-    // Only set domain if it's different from none
-    if (newDomain !== 'none') {
-      setDomain(newDomain);
-    }
+    // Set the detected domain
+    setDomain(nextDomain);
     
     setMessages(prevMessages => [...prevMessages, userMessage]);
     setIsLoading(true);
     setMessage('');
 
     try {
-      // Send message to API
-      const response = await chatClient.sendMessage(message, newDomain);
+      // Send message to API with routing context
+      const response = await chatClient.sendChat({
+        message,
+        chatHistory,
+        router: routeResult,
+        template: nextDomain
+      });
 
       // Handle successful response
-      if (response.reply) {
+      if (response.text) {
         const botMessage: Message = {
           id: generateId(),
-          text: response.reply,
+          text: response.text,
           type: 'bot',
           timestamp: new Date()
         };
@@ -109,9 +134,16 @@ const ChatPanel: React.FC = () => {
         setMessages(prevMessages => [...prevMessages, botMessage]);
         
         // Update domain if it was detected
-        if (response.domain) {
-          setDomain(response.domain);
+        if (response.meta?.domain) {
+          setDomain(response.meta.domain);
         }
+        
+        // Update chat history with the new exchange
+        setChatHistory(prev => [
+          ...prev,
+          { role: 'user', content: message },
+          { role: 'assistant', content: response.text }
+        ]);
       }
       
       // Handle error in the response
@@ -160,6 +192,7 @@ const ChatPanel: React.FC = () => {
             <div><strong>Router Domain:</strong> {domain || 'none'}</div>
             <div><strong>Router Confidence:</strong> {routerConfidence.toFixed(2)}</div>
             <div><strong>Template ID:</strong> {templateId || 'none'}</div>
+            <div><strong>Chat History:</strong> {chatHistory.length} messages</div>
           </div>
         )}
       </div>

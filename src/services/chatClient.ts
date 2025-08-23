@@ -37,7 +37,19 @@ declare global {
       routerDomain?: string;
       routerConfidence?: number;
       routerGroundingType?: string;
+      groundingType?: string;
       templateId?: string;
+      responseDomain?: string;
+      responseGroundingType?: string;
+      responseConfidence?: number;
+      lastRequestTime?: string;
+      lastRequestEndpoint?: string;
+      lastResponseTime?: string;
+      lastResponseStatus?: number;
+      lastError?: string;
+      errors?: string[];
+      initTime?: string;
+      initSource?: string;
     };
   }
 }
@@ -47,64 +59,195 @@ if (typeof window !== 'undefined') {
   window.__riskillDebug = window.__riskillDebug || { endpoint: '', platform: '' };
 }
 
+/**
+ * Verify that chat client is properly configured for production use
+ * @returns {Object} Verification result with success and issues
+ */
+export function verifyChatClientConfig() {
+  const debug = window.__riskillDebug || {};
+  const result: {
+    success: boolean;
+    serverlessOnly: boolean;
+    platform: string;
+    endpoint: string;
+    issues: string[];
+    details: Record<string, any>;
+  } = {
+    success: true,
+    serverlessOnly: true,
+    platform: debug.platform || 'not detected',
+    endpoint: debug.endpoint || 'not configured',
+    issues: [],
+    details: {}
+  };
+  
+  // Check if platform is properly detected
+  if (!debug.platform) {
+    result.success = false;
+    result.issues.push('Platform not detected');
+  }
+  
+  // Check if endpoint is properly configured
+  if (!debug.endpoint) {
+    result.success = false;
+    result.issues.push('Endpoint not configured');
+  } else {
+    // Ensure endpoint is a serverless endpoint
+    const isNetlifyEndpoint = debug.endpoint.includes('/.netlify/functions/');
+    const isVercelEndpoint = debug.endpoint.startsWith('/api/');
+    if (!isNetlifyEndpoint && !isVercelEndpoint) {
+      result.success = false;
+      result.serverlessOnly = false;
+      result.issues.push('Not using a serverless endpoint');
+    }
+  }
+  
+  // Check for initialization errors
+  if (debug.errors && debug.errors.length > 0) {
+    result.success = false;
+    result.issues.push('Initialization errors detected');
+    result.details.errors = debug.errors;
+  }
+  
+  // Check last request/response
+  if (debug.lastRequestEndpoint) {
+    result.details.lastRequest = {
+      time: debug.lastRequestTime,
+      endpoint: debug.lastRequestEndpoint,
+      responseStatus: debug.lastResponseStatus,
+      responseTime: debug.lastResponseTime,
+      error: debug.lastError
+    };
+    
+    // Ensure last request was to a serverless endpoint
+    const isNetlifyRequest = debug.lastRequestEndpoint.includes('/.netlify/functions/');
+    const isVercelRequest = debug.lastRequestEndpoint.startsWith('/api/');
+    if (!isNetlifyRequest && !isVercelRequest) {
+      result.success = false;
+      result.serverlessOnly = false;
+      result.issues.push('Last request was not to a serverless endpoint');
+    }
+  }
+  
+  // Add routing info to details
+  if (debug.routerDomain) {
+    result.details.routing = {
+      domain: debug.routerDomain,
+      confidence: debug.routerConfidence,
+      groundingType: debug.groundingType,
+      responseDomain: debug.responseDomain,
+      responseGroundingType: debug.responseGroundingType
+    };
+  }
+  
+  return result;
+}
+
 export const chatClient = {
   endpoint: '',
   initialized: false,
 
   /**
-   * Initialize the chat client by detecting the platform
+   * Initialize the chat client with the proper platform configuration
+   * @returns {Object} Initialization result with success and diagnostic info
    */
   async init() {
-    if (this.initialized) return;
+    if (this.initialized) {
+      return {
+        success: true,
+        platform: window.__riskillDebug.platform,
+        endpoint: this.endpoint,
+        message: 'Already initialized'
+      };
+    }
     
-    // Try Vercel endpoint first
-    try {
-      const vercelResponse = await fetch('/api/health');
-      if (vercelResponse.ok) {
-        const data = await vercelResponse.json();
-        if (data.ok) {
+    const deployPlatform = import.meta?.env?.VITE_DEPLOY_PLATFORM;
+    const initResult: {
+      success: boolean;
+      platform: string | null;
+      endpoint: string | null;
+      message: string;
+      diagnostics: Record<string, any>;
+    } = {
+      success: false,
+      platform: null,
+      endpoint: null,
+      message: '',
+      diagnostics: {}
+    };
+    
+    if (deployPlatform) {
+      if (deployPlatform === 'netlify') {
+        this.endpoint = '/.netlify/functions/chat';
+        window.__riskillDebug.endpoint = this.endpoint;
+        window.__riskillDebug.platform = 'netlify';
+        initResult.platform = 'netlify';
+        initResult.endpoint = this.endpoint;
+        initResult.message = 'Initialized from VITE_DEPLOY_PLATFORM env var';
+      } else if (deployPlatform === 'vercel') {
+        this.endpoint = '/api/chat';
+        window.__riskillDebug.endpoint = this.endpoint;
+        window.__riskillDebug.platform = 'vercel';
+        initResult.platform = 'vercel';
+        initResult.endpoint = this.endpoint;
+        initResult.message = 'Initialized from VITE_DEPLOY_PLATFORM env var';
+      } else {
+        console.error(`Unknown platform: ${deployPlatform}`);
+        initResult.message = `Unknown platform: ${deployPlatform}`;
+        window.__riskillDebug.errors = window.__riskillDebug.errors || [];
+        window.__riskillDebug.errors.push(`Unknown platform: ${deployPlatform}`);
+      }
+    } else {
+      console.log('No VITE_DEPLOY_PLATFORM found, attempting to detect...');
+      initResult.message = 'No VITE_DEPLOY_PLATFORM found, attempting to detect';
+      initResult.diagnostics.envVarMissing = true;
+      
+      // Try health endpoints to determine platform
+      try {
+        const vercelHealth = await fetch('/api/health');
+        if (vercelHealth.ok) {
           this.endpoint = '/api/chat';
-          if (typeof window !== 'undefined') {
-            window.__riskillDebug.endpoint = this.endpoint;
-            window.__riskillDebug.platform = 'vercel';
-          }
-          console.log('Using Vercel endpoint:', this.endpoint);
-          this.initialized = true;
-          return;
-        }
-      }
-    } catch (error) {
-      console.log('Vercel endpoint not available');
-    }
-    
-    // Fall back to Netlify endpoint
-    try {
-      const netlifyResponse = await fetch('/.netlify/functions/health');
-      if (netlifyResponse.ok) {
-        const data = await netlifyResponse.json();
-        if (data.ok) {
-          this.endpoint = '/.netlify/functions/chat';
-          if (typeof window !== 'undefined') {
-            window.__riskillDebug.endpoint = this.endpoint;
+          window.__riskillDebug.platform = 'vercel';
+          initResult.platform = 'vercel';
+          initResult.endpoint = this.endpoint;
+          initResult.message += ', detected Vercel via health check';
+          console.log('Detected Vercel platform via health check');
+        } else {
+          const netlifyHealth = await fetch('/.netlify/functions/health');
+          if (netlifyHealth.ok) {
+            this.endpoint = '/.netlify/functions/chat';
             window.__riskillDebug.platform = 'netlify';
+            initResult.platform = 'netlify';
+            initResult.endpoint = this.endpoint;
+            initResult.message += ', detected Netlify via health check';
+            console.log('Detected Netlify platform via health check');
+          } else {
+            console.error('Could not detect platform');
+            initResult.message += ', could not detect platform via health checks';
+            window.__riskillDebug.errors = window.__riskillDebug.errors || [];
+            window.__riskillDebug.errors.push('Could not detect platform via health checks');
           }
-          console.log('Using Netlify endpoint:', this.endpoint);
-          this.initialized = true;
-          return;
         }
+      } catch (e) {
+        console.error('Error detecting platform:', e);
+        initResult.message += ', error during platform detection';
+        initResult.diagnostics.error = e instanceof Error ? e.message : String(e);
+        window.__riskillDebug.errors = window.__riskillDebug.errors || [];
+        window.__riskillDebug.errors.push('Error detecting platform: ' + (e instanceof Error ? e.message : String(e)));
       }
-    } catch (error) {
-      console.log('Netlify endpoint not available');
     }
     
-    // Default fallback if both fail
-    this.endpoint = '/api/chat';
-    if (typeof window !== 'undefined') {
-      window.__riskillDebug.endpoint = this.endpoint;
-      window.__riskillDebug.platform = 'unknown';
-    }
-    console.warn('Could not detect platform, defaulting to:', this.endpoint);
-    this.initialized = true;
+    // Store initialization time for runtime verification
+    window.__riskillDebug.initTime = new Date().toISOString();
+    window.__riskillDebug.initSource = initResult.message;
+    
+    this.initialized = Boolean(this.endpoint);
+    initResult.success = this.initialized;
+    
+    console.log(`Chat client initialized for platform: ${window.__riskillDebug.platform}`);
+    console.log(`Using endpoint: ${this.endpoint}`);
+    
+    return initResult;
   },
 
   /**
@@ -197,54 +340,110 @@ export const chatClient = {
   },
   
   /**
-   * Send a chat message with grounding information
-   * @param userText The user message
-   * @param history Array of previous messages in the conversation
-   * @returns Promise with the chat response
+   * Send a chat message to the API and receive a response
+   * @param params - The parameters for sending a chat
+   * @param params.message - The message to send
+   * @param params.chatHistory - The chat history
+   * @param params.router - The router context with domain and confidence
+   * @param params.template - The template ID
+   * @returns The chat response with text and mode
    */
-  async sendChat(userText: string, history: Array<{role: "user" | "assistant", content: string}> = []): Promise<ChatResponse> {
-    // Ensure client is initialized
+  async sendChat(params: {
+    message: string;
+    chatHistory?: Array<{type: string; text: string}>;
+    router?: {domain: string; confidence: number};
+    template?: string;
+  }) {
+    const { message, chatHistory, router, template } = params;
+    
     if (!this.initialized) {
-      await this.init();
+      const initResult = await this.init();
+      if (!initResult.success) {
+        console.error('Failed to initialize chat client:', initResult.message);
+        window.__riskillDebug.lastError = 'Init failed: ' + initResult.message;
+        return { mode: 'nodata', text: 'Service unavailable' };
+      }
     }
     
+    // Ensure we have a chat endpoint before continuing
+    if (!this.endpoint) {
+      console.error('No chat endpoint configured');
+      window.__riskillDebug.lastError = 'No chat endpoint configured';
+      return { mode: 'nodata', text: 'Service unavailable' };
+    }
+    
+    const history = chatHistory?.map(msg => ({
+      role: msg.type === 'user' ? 'user' : 'assistant',
+      content: msg.text
+    })) || [];
+    
+    // Update debug info with router domain and confidence
+    if (router) {
+      window.__riskillDebug.routerDomain = router.domain;
+      window.__riskillDebug.routerConfidence = router.confidence;
+      window.__riskillDebug.groundingType = 'router';
+    }
+    
+    // Track request time for verification
+    const requestTime = new Date().toISOString();
+    window.__riskillDebug.lastRequestTime = requestTime;
+    window.__riskillDebug.lastRequestEndpoint = this.endpoint;
+    
     try {
-      // Build the grounded request
-      const body = await this.buildGroundedRequest(userText, history);
-      
-      // Send the request to the API
+      // Always send to serverless endpoint
       const response = await fetch(this.endpoint, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify({
+          message,
+          history,
+          router,
+          template
+        })
       });
       
+      // Track response time for verification
+      window.__riskillDebug.lastResponseTime = new Date().toISOString();
+      window.__riskillDebug.lastResponseStatus = response.status;
+      
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Error from ${this.endpoint}:`, response.status, errorText);
+        window.__riskillDebug.lastError = `${response.status}: ${errorText.substring(0, 100)}`;
+        
         try {
-          // Try to parse error response as JSON
-          const text = await response.text();
-          let errorMessage = `Error: ${response.status} ${response.statusText}`;
-          
-          if (text && text.trim() !== '') {
-            try {
-              const errorData = JSON.parse(text);
-              if (errorData.error) errorMessage = errorData.error;
-            } catch (e) {
-              // If JSON parsing fails, use the text as error message
-              errorMessage = text;
-            }
+          // Try to parse error as JSON
+          const errorJson = JSON.parse(errorText);
+          if (errorJson.mode === 'nodata') {
+            return errorJson; // Return structured nodata response
           }
-          throw new Error(errorMessage);
         } catch (e) {
-          throw new Error(`Error: ${response.status} ${response.statusText}`);
+          // Not JSON, continue to default error
         }
+        
+        return { mode: 'nodata', text: 'Service unavailable' };
       }
       
-      // Safely parse response
-      const text = await response.text();
-      if (!text || text.trim() === '') {
+      const data = await response.json();
+      
+      // Handle structured response format
+      if (data.mode === 'nodata') {
+        return data;
+      }
+      
+      // Update debug with metadata
+      if (data.meta) {
+        window.__riskillDebug.responseDomain = data.meta.domain;
+        window.__riskillDebug.responseGroundingType = data.meta.groundingType;
+        window.__riskillDebug.responseConfidence = data.meta.confidence;
+      }
+      
+      return { 
+        text: data.text || data.reply || 'No response from server',
+        mode: data.mode || 'chat'
+      };
         return { text: 'Received empty response from server', error: 'Empty response' };
       }
       
@@ -257,20 +456,21 @@ export const chatClient = {
         };
       }
     } catch (error) {
-      console.error('Chat API error:', error);
+      console.error('[ChatClient] Chat API error:', error);
       return {
-        text: '',
-        error: error instanceof Error ? error.message : 'Unknown error occurred'
+        text: 'Service unavailable. Please try again later.',
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+        meta: {
+          domain: null,
+          confidence: 0,
+          groundingType: 'no_data'
+        },
+        mode: 'nodata',
+        reason: 'network_error'
       };
     }
   },
   
-  /**
-   * Legacy method for backward compatibility
-   * @deprecated Use sendChat instead
-   */
-  async sendMessage(message: string, _domain?: string): Promise<ChatResponse> {
-    console.warn('sendMessage is deprecated, use sendChat instead');
-    return this.sendChat(message, []);
-  }
+  // Deprecated sendMessage method has been removed
+  // Use sendChat instead
 };
