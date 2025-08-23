@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { chatClient } from '../../services/chatClient';
 import { routeMessage } from '../../data/router/router';
 import { getTemplateSummaryFunction } from '../../data/templates';
+import { verifyChatClientConfig } from '../../services/verify';
 
 type MessageType = 'user' | 'bot' | 'error';
 
@@ -44,9 +45,19 @@ const ChatPanel: React.FC = () => {
       setShowDebug(debug === '1');
     };
     
-    // Initialize chatClient
+    // Verify configuration and initialize debug info
+    const { platform, endpointHint, debug } = verifyChatClientConfig();
+    
+    // Make config available globally for debugging
+    window.__riskillDebug = window.__riskillDebug || {};
+    window.__riskillDebug.platform = platform;
+    window.__riskillDebug.endpoint = endpointHint;
+    window.__riskillDebug.debug = debug;
+    
+    // Initialize chatClient with verified config
     const initClient = async () => {
-      await chatClient.init();
+      // Pass the verified endpoint if needed
+      await chatClient.init(endpointHint);
     };
     
     window.addEventListener('popstate', checkDebugMode);
