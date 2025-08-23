@@ -1,0 +1,18 @@
+--- a/src/services/chatClient.ts
++++ b/src/services/chatClient.ts
+@@ -443,17 +443,7 @@ export const chatClient = {
+       return { 
+         text: data.text || data.reply || 'No response from server',
+         mode: data.mode || 'chat'
+-      };
+-        return { text: 'Received empty response from server', error: 'Empty response' };
+-      }
+-      
+-      try {
+-        return JSON.parse(text);
+-      } catch (e) {
+-        return { 
+-          text: 'Unable to parse server response', 
+-          error: `JSON parse error: ${e instanceof Error ? e.message : 'Unknown parsing error'}` 
+-        };
++      };
