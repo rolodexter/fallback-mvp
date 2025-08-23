@@ -1,0 +1,33 @@
+--- a/src/components/chat/ChatPanel.tsx
++++ b/src/components/chat/ChatPanel.tsx
+@@ -98,10 +98,10 @@ const ChatPanel: React.FC = () => {
+     }
+     
+     // Handle successful response
+-    if (response.reply) {
++    if (response.text) {
+       const botMessage: Message = {
+         id: generateId(),
+-        text: response.reply,
++        text: response.text,
+         type: 'bot',
+         timestamp: new Date()
+       };
+@@ -109,8 +109,8 @@ const ChatPanel: React.FC = () => {
+       setMessages(prevMessages => [...prevMessages, botMessage]);
+       
+       // Update domain if it was detected
+-      if (response.domain) {
+-        setDomain(response.domain);
++      if (response.meta?.domain) {
++        setDomain(response.meta.domain);
+       }
+       
+       // Update chat history with the new exchange
+@@ -118,7 +118,7 @@ const ChatPanel: React.FC = () => {
+         ...prev,
+         { role: 'user', content: message },
+-        { role: 'assistant', content: response.reply }
++        { role: 'assistant', content: response.text }
+       ]);
+     }
