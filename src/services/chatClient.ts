@@ -9,7 +9,7 @@ import { runTemplate } from "../data/templates";
 import { executeBigQuery } from "./bigQueryClient";
 
 // Request and response type definitions
-type ChatResponse = {
+export type ChatResponse = {
   text: string; // Changed from reply to text to match the backend response
   meta?: {
     domain: string | null;
