@@ -1,0 +1,14 @@
+--- a/src/test_grounding.ts
++++ b/src/test_grounding.ts
+@@ -86,8 +86,9 @@ for (const domain of domains) {
+   try {
+     console.log(`\nTemplate for domain: ${domain}`);
+     const template = runTemplate(domain, {});
+-    console.log(`KPI Summary: ${template.kpiSummary}`);
+-    console.log(`Template Output:\n${template.templateOutput}`);
++    template.then(result => {
++      console.log(`KPI Summary: ${result.kpiSummary}\nTemplate Output:\n${result.templateOutput}`);
++    });
+   } catch (error) {
+     console.error(`Error generating template for ${domain}:`, error);
+   }
