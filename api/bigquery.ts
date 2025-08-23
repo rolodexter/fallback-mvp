@@ -46,8 +46,9 @@ const readSqlTemplate = (templateId: string): string => {
     
     const sqlPath = path.join(basePath, 'sql', `${templateId}.sql`);
     return fs.readFileSync(sqlPath, 'utf8');
-  } catch (error) {
-    throw new Error(`Failed to read SQL template ${templateId}: ${error.message}`);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to read SQL template ${templateId}: ${errorMessage}`);
   }
 };
 
@@ -91,14 +92,14 @@ const executeBigQuery = async (
         query: sqlQuery
       }
     };
-  } catch (error) {
+  } catch (error: unknown) {
     console.error(`BigQuery execution error:`, error);
     return {
       success: false,
       rows: [],
       diagnostics: {
         message: 'Failed to execute BigQuery',
-        error: error.message,
+        error: error instanceof Error ? error.message : String(error),
         template_id: templateId,
         params
       }
@@ -158,12 +159,12 @@ export default async function handler(
     
     // Return response
     res.status(result.success ? 200 : 500).json(result);
-  } catch (error) {
+  } catch (error: unknown) {
     res.status(500).json({
       success: false,
       diagnostics: {
         message: 'Server error',
-        error: error.message
+        error: error instanceof Error ? error.message : String(error)
       }
     });
   }
