@@ -1,5 +1,8 @@
 import { BigQuery } from '@google-cloud/bigquery';
 
+// Vercel Node runtime configuration
+export const config = { runtime: "nodejs18.x" };
+
 // Define types for Vercel API handlers (without depending on Next.js)
 type NextApiRequest = {
   body: any;
