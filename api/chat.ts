@@ -93,14 +93,15 @@ export default async function handler(
   }
   
   try {
-    // Parse the request body
-    const { message, history, grounding, router, template, params } = request.body as ChatRequest;
+    // Parse the request body safely
+    const body = (request as any).body ?? {};
+    const { message, history, grounding, router, template, params } = body as ChatRequest;
     
-    if (!message) {
-      return response.status(400).json({ 
+    if (!message || typeof message !== 'string') {
+      return response.status(200).json({ 
         mode: 'nodata', 
         reason: 'missing_message',
-        text: 'Invalid request. Message is required.'
+        text: 'No message provided.'
       });
     }
     
@@ -246,11 +247,29 @@ BIGQUERY DATA:\n${resultsText}`;
       // Call LLM provider
       responseText = await callLLMProvider(message, systemPrompt, [], bigQueryData, domain);
     } else {
-      // Generic prompt when no grounding
-      systemPrompt = `You are Riskill, a financial data analysis assistant. Answer questions about financial KPIs and business metrics. If you don't know the answer, say "I don't have that information available." DO NOT make up data.`;
-      
-      // Call LLM provider
-      responseText = await callLLMProvider(message, systemPrompt, [], null, null);
+      // No grounding available
+      if (dataMode === 'mock') {
+        // Stage-A: do not call LLM, return abstain deterministically
+        return response.status(200).json({
+          mode: 'abstain',
+          text: 'I don\'t have the data you\'re looking for right now.',
+          abstain_reason: 'no_grounding_data',
+          meta: {
+            domain: domainToUse,
+            confidence: routeResult.confidence,
+            groundingType: 'none'
+          },
+          provenance: {
+            source: dataMode,
+            template_id: providedTemplateId || domainToUse,
+            params: params || {}
+          }
+        });
+      } else {
+        // Live mode: allow generic LLM call
+        systemPrompt = `You are Riskill, a financial data analysis assistant. Answer questions about financial KPIs and business metrics. If you don't know the answer, say "I don't have that information available." DO NOT make up data.`;
+        responseText = await callLLMProvider(message, systemPrompt, [], null, null);
+      }
     }
     
     // Extract widgets from template data if available
@@ -284,22 +303,20 @@ BIGQUERY DATA:\n${resultsText}`;
     
   } catch (error) {
     console.error('Error processing request:', error);
-    // Error message for logging only
-    
     if (error instanceof Error) {
       console.error(error.message);
-      // Don't expose sensitive error details to the client
       if (process.env.NODE_ENV === 'development') {
-        // Log development error
         console.error(`Development error: ${error.message}`);
       }
     }
-    
-    return response.status(500).json({
-      mode: 'nodata',
-      reason: 'server_error',
-      text: 'Service unavailable. Please try again later.',
-      details: process.env.NODE_ENV === 'development' && error instanceof Error ? error.message : 'Unknown error'
+    // Fail-safe: never 500 in Stage-A; return deterministic abstain
+    return response.status(200).json({
+      mode: 'abstain',
+      text: 'Runtime guard activated. See Functions logs for details.',
+      provenance: {
+        source: (typeof dataMode !== 'undefined' ? dataMode : 'mock'),
+        error: error instanceof Error ? error.message : String(error)
+      }
     });
   }
 }

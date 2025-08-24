@@ -6,6 +6,10 @@
 import { executeBigQuery, mapDomainToTemplateId } from '../../services/bigQueryClient';
 import templateRegistry from './template_registry.json';
 
+// Stage-A default: mock mode
+const DATA_MODE = (process.env.DATA_MODE ?? 'mock');
+const IS_LIVE = DATA_MODE === 'live';
+
 type BusinessUnit = {
   business_unit: string;
   revenue_this_year: number;
@@ -44,6 +48,9 @@ type RegionalData = {
 
 export async function performanceSummary(data?: any): Promise<string> { 
   try {
+    if (!IS_LIVE) {
+      return "Business Units: Navigation +2.7% YoY, Liferafts -1.5% YoY, Overall +0.4% YoY (fallback data).";
+    }
     // Use provided data if available, otherwise fetch from BigQuery
     let businessUnits: BusinessUnit[];
     
@@ -82,6 +89,9 @@ export async function performanceSummary(data?: any): Promise<string> {
 
 export async function counterpartySummary(data?: any): Promise<string> { 
   try {
+    if (!IS_LIVE) {
+      return "Top counterparties: ACME Corp (€2.1M), Globex Marine (€1.8M), Oceanic Partners (€1.3M) (fallback data).";
+    }
     // Use provided data if available, otherwise fetch from BigQuery
     let counterparties: Counterparty[];
     
@@ -111,6 +121,9 @@ export async function counterpartySummary(data?: any): Promise<string> {
 
 export async function riskSummary(data?: any): Promise<string> { 
   try {
+    if (!IS_LIVE) {
+      return "Current risk factors: Supply chain delays (high), Market volatility (medium), Regulatory changes (low) (fallback data).";
+    }
     // Use provided data if available, otherwise fetch from BigQuery
     let risks: Risk[];
     
@@ -149,6 +162,9 @@ export async function riskSummary(data?: any): Promise<string> {
 
 export async function profitabilitySummary(data?: any): Promise<string> { 
   try {
+    if (!IS_LIVE) {
+      return "Business unit profitability: Navigation (32.5% margin), Safety Equipment (28.1% margin), Overall (30.2% margin) (fallback data).";
+    }
     // Use provided data if available, otherwise fetch from BigQuery
     let profitabilityData: ProfitabilityData[];
     
@@ -186,6 +202,9 @@ export async function profitabilitySummary(data?: any): Promise<string> {
 
 export async function regionalSummary(data?: any): Promise<string> { 
   try {
+    if (!IS_LIVE) {
+      return "Regional revenue: AMBA (€2.8M, +4.2%), Patagonia (€1.9M, +2.1%), Buenos Aires (€1.5M, -1.2%) (fallback data).";
+    }
     // Use provided data if available, otherwise fetch from BigQuery
     let regionalData: RegionalData[];
     
@@ -250,6 +269,16 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
   try {
     switch (domain) {
       case 'performance':
+        if (!IS_LIVE) {
+          return [
+            "## Business Unit Performance (YoY)\n",
+            "* Navigation: €4.5M (+2.7% YoY)",
+            "* Liferafts: €3.2M (-1.5% YoY)",
+            "* Safety Equipment: €2.1M (+1.2% YoY)",
+            "* Training: €1.8M (+0.9% YoY)",
+            "* Overall: €11.6M (+0.4% YoY)"
+          ].join('\n');
+        }
         // Use provided data or fetch from BigQuery
         let businessUnits;
         if (data?.rows) {
@@ -292,6 +321,16 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
         return `## Business Unit Performance (YoY)\n\n${formattedUnits}\n${overallLine}`;
       
       case 'counterparties':
+        if (!IS_LIVE) {
+          return [
+            "## Top 5 Counterparties (Revenue)\n",
+            "* ACME Corp: €2.1M (18.1%)",
+            "* Globex Marine: €1.8M (15.5%)",
+            "* Oceanic Partners: €1.3M (11.2%)",
+            "* SeaSecure Ltd: €0.9M (7.8%)",
+            "* MarineMax Inc: €0.7M (6.0%)"
+          ].join('\n');
+        }
         // Use provided data or fetch from BigQuery
         let counterparties;
         if (data?.rows) {
@@ -322,6 +361,16 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
         return `## Top ${counterparties.length} Counterparties (Revenue)\n\n${formattedCounterparties}`;
       
       case 'risk':
+        if (!IS_LIVE) {
+          return [
+            "## Current Risk Assessment\n",
+            "* Supply chain delays: HIGH (Impact: €0.5M)",
+            "* Market volatility: MEDIUM (Impact: €0.3M)",
+            "* Regulatory changes: LOW (Impact: €0.1M)",
+            "* Contract disputes: LOW (Impact: €0.1M)",
+            "* Currency fluctuations: MEDIUM (Impact: €0.2M)"
+          ].join('\n');
+        }
         // Use provided data or fetch from BigQuery
         let risks;
         if (data?.rows) {
@@ -364,6 +413,16 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
 
       case 'regional':
         // Implementation for regional similar to others
+        if (!IS_LIVE) {
+          return [
+            "## Regional Revenue Trend (24 months)\n",
+            "* AMBA: €2.8M average monthly revenue (trend: +4.2%)",
+            "* Patagonia: €1.9M average monthly revenue (trend: +2.1%)",
+            "* Buenos Aires: €1.5M average monthly revenue (trend: -1.2%)",
+            "* Córdoba: €1.2M average monthly revenue (trend: +0.8%)",
+            "* Mendoza: €0.9M average monthly revenue (trend: +1.5%)"
+          ].join('\n');
+        }
         return "Regional data not available.";
 
       default:
@@ -479,6 +538,13 @@ export function getBigQueryTemplateId(domain: string): string {
  */
 export async function runTemplate(domain: string, store: any): Promise<{ kpiSummary: string | null, templateOutput: string | null }> {
   try {
+    // Stage-A: if not live and domain not in registry, short-circuit to no data
+    if (!IS_LIVE) {
+      const reg = getTemplateRegistry();
+      if (!reg || !(domain in reg)) {
+        return { kpiSummary: null, templateOutput: null };
+      }
+    }
     // Get the summary function for the domain
     const summaryFn = getTemplateSummaryFunction(domain);
     
