@@ -17,6 +17,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
+    "types": ["node", "vite/client"],
 
     /* Linting */
     "strict": true,
@@ -24,6 +25,13 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"],
+  "include": [
+    "src",
+    "api",
+    "functions",
+    "netlify/functions",
+    "tests",
+    "*.ts"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
