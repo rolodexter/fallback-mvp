@@ -1,15 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import dotenv from 'dotenv';
-import { callLLMProvider } from '../src/services/llmProvider';
-import { routeMessage } from '../src/data/router/router';
-import { runTemplate } from '../src/data/templates';
-import templateRegistry from '../src/data/templates/template_registry';
+ 
+ // Vercel Node runtime configuration
+ export const config = { runtime: "nodejs18.x" as const };
 
 // Supported data modes
 type DataMode = 'mock' | 'live';
 
-// Load environment variables
-dotenv.config();
+// No dotenv in serverless functions; rely on platform env
 
 // Normalize template hint from client (can be string or object with id)
 type TemplateHint = string | { id?: string } | null | undefined;
@@ -99,6 +96,22 @@ export default async function handler(
     const { message, history, grounding, router, template, params } = body as ChatRequest;
     // Normalize template id from hint
     const providedTemplateId = getTemplateId(template);
+    // Lazy-load template registry to avoid module-init failures
+    let templateRegistry: any;
+    try {
+      const mod = await import('../src/data/templates/template_registry');
+      templateRegistry = mod.default;
+    } catch (err) {
+      return response.status(200).json({
+        mode: 'abstain',
+        text: 'Dependency unavailable',
+        provenance: {
+          source: dataMode,
+          tag: 'IMPORT_REGISTRY_FAIL',
+          error: err instanceof Error ? err.message : String(err)
+        }
+      });
+    }
     // If client supplied a template id that is not present in registry, short-circuit in Stage-A
     if (providedTemplateId) {
       const registryTemplateIds = Object.values(templateRegistry)
@@ -126,7 +139,24 @@ export default async function handler(
     }
     
     // Determine routing; if client router lacks confidence, compute on server
-    const serverRoute = routeMessage(message);
+    // Lazy-load router to avoid module-init failures
+    let routeMessageFn: any;
+    try {
+      const mod = await import('../src/data/router/router');
+      routeMessageFn = mod.routeMessage;
+      if (typeof routeMessageFn !== 'function') throw new Error('routeMessage not found');
+    } catch (err) {
+      return response.status(200).json({
+        mode: 'abstain',
+        text: 'Dependency unavailable',
+        provenance: {
+          source: dataMode,
+          tag: 'IMPORT_ROUTER_FAIL',
+          error: err instanceof Error ? err.message : String(err)
+        }
+      });
+    }
+    const serverRoute = routeMessageFn(message);
     let routeResult = router && typeof router.domain === 'string'
       ? { domain: router.domain, confidence: typeof router.confidence === 'number' ? router.confidence : serverRoute.confidence }
       : serverRoute;
@@ -155,7 +185,24 @@ export default async function handler(
     if (!groundingData && domainToUse && routeResult.confidence >= 0.3) {
       try {
         console.info(`[Vercel] Generating grounding data for domain: ${domainToUse}`);
-        const templateData = await runTemplate(domainToUse, null);
+        // Lazy-load templates module
+        let runTemplateFn: any;
+        try {
+          const mod = await import('../src/data/templates');
+          runTemplateFn = mod.runTemplate;
+          if (typeof runTemplateFn !== 'function') throw new Error('runTemplate not found');
+        } catch (err) {
+          return response.status(200).json({
+            mode: 'abstain',
+            text: 'Dependency unavailable',
+            provenance: {
+              source: dataMode,
+              tag: 'IMPORT_TEMPLATES_FAIL',
+              error: err instanceof Error ? err.message : String(err)
+            }
+          });
+        }
+        const templateData = await runTemplateFn(domainToUse, null);
         
         groundingData = {
           domain: domainToUse,
@@ -175,7 +222,24 @@ export default async function handler(
     if (dataMode === 'live' && !groundingData && domainToUse && routeResult.confidence >= 0.3) {
       try {
         console.info(`[Vercel] Generating grounding data for domain: ${domainToUse}`);
-        const templateData = await runTemplate(domainToUse, null);
+        // Lazy-load templates module
+        let runTemplateFn: any;
+        try {
+          const mod = await import('../src/data/templates');
+          runTemplateFn = mod.runTemplate;
+          if (typeof runTemplateFn !== 'function') throw new Error('runTemplate not found');
+        } catch (err) {
+          return response.status(200).json({
+            mode: 'abstain',
+            text: 'Dependency unavailable',
+            provenance: {
+              source: dataMode,
+              tag: 'IMPORT_TEMPLATES_FAIL',
+              error: err instanceof Error ? err.message : String(err)
+            }
+          });
+        }
+        const templateData = await runTemplateFn(domainToUse, null);
         
         groundingData = {
           domain: domainToUse,
@@ -237,6 +301,21 @@ KPI SUMMARY:\n${kpiSummary || 'No KPI summary available.'}
 
 TEMPLATE OUTPUT:\n${templateOutput}`;
         
+        // Lazy-load LLM provider
+        let callLLMProvider: any;
+        try {
+          ({ callLLMProvider } = await import('../src/services/llmProvider'));
+        } catch (err) {
+          return response.status(200).json({
+            mode: 'abstain',
+            text: 'Dependency unavailable',
+            provenance: {
+              source: dataMode,
+              tag: 'IMPORT_LLM_FAIL',
+              error: err instanceof Error ? err.message : String(err)
+            }
+          });
+        }
         // Call LLM provider
         responseText = await callLLMProvider(message, systemPrompt, history, null, domain);
       }
@@ -247,6 +326,21 @@ TEMPLATE OUTPUT:\n${templateOutput}`;
 
 BIGQUERY DATA:\n${resultsText}`;
       
+      // Lazy-load LLM provider
+      let callLLMProvider: any;
+      try {
+        ({ callLLMProvider } = await import('../src/services/llmProvider'));
+      } catch (err) {
+        return response.status(200).json({
+          mode: 'abstain',
+          text: 'Dependency unavailable',
+          provenance: {
+            source: dataMode,
+            tag: 'IMPORT_LLM_FAIL',
+            error: err instanceof Error ? err.message : String(err)
+          }
+        });
+      }
       // Call LLM provider
       responseText = await callLLMProvider(message, systemPrompt, [], bigQueryData, domain);
     } else {
@@ -255,7 +349,7 @@ BIGQUERY DATA:\n${resultsText}`;
         // Stage-A: do not call LLM, return abstain deterministically
         return response.status(200).json({
           mode: 'abstain',
-          text: 'I don\'t have the data you\'re looking for right now.',
+          text: 'I don't have the data you're looking for right now.',
           abstain_reason: 'no_grounding_data',
           meta: {
             domain: domainToUse,
@@ -271,6 +365,21 @@ BIGQUERY DATA:\n${resultsText}`;
       } else {
         // Live mode: allow generic LLM call
         systemPrompt = `You are Riskill, a financial data analysis assistant. Answer questions about financial KPIs and business metrics. If you don't know the answer, say "I don't have that information available." DO NOT make up data.`;
+        // Lazy-load LLM provider
+        let callLLMProvider: any;
+        try {
+          ({ callLLMProvider } = await import('../src/services/llmProvider'));
+        } catch (err) {
+          return response.status(200).json({
+            mode: 'abstain',
+            text: 'Dependency unavailable',
+            provenance: {
+              source: dataMode,
+              tag: 'IMPORT_LLM_FAIL',
+              error: err instanceof Error ? err.message : String(err)
+            }
+          });
+        }
         responseText = await callLLMProvider(message, systemPrompt, [], null, null);
       }
     }
