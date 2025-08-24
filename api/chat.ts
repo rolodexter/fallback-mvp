@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
  
  // Vercel Node runtime configuration
- export const config = { runtime: "nodejs18.x" as const };
+ export const config = { runtime: "nodejs18.x" };
 
 // Supported data modes
 type DataMode = 'mock' | 'live';
