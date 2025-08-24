@@ -4,7 +4,7 @@
  */
 
 import { executeBigQuery, mapDomainToTemplateId } from '../../services/bigQueryClient';
-import templateRegistry from './template_registry.json';
+import templateRegistry from './template_registry';
 
 // Stage-A default: mock mode
 const DATA_MODE = (process.env.DATA_MODE ?? 'mock');

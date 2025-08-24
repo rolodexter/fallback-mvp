@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import { callLLMProvider } from '../src/services/llmProvider';
 import { routeMessage } from '../src/data/router/router';
 import { runTemplate } from '../src/data/templates';
-import templateRegistry from '../src/data/templates/template_registry.json';
+import templateRegistry from '../src/data/templates/template_registry';
 
 // Supported data modes
 type DataMode = 'mock' | 'live';

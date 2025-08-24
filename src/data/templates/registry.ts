@@ -1,9 +1,9 @@
 /**
  * TEMPLATE_REGISTRY: Maps template_id to runnable template functions
- * Stage-A: Exports template IDs exactly matching those in template_registry.json
+ * Stage-A: Exports template IDs exactly matching those in template_registry.ts
  */
 
-import templateConfig from "./template_registry.json";
+import templateConfig from "./template_registry";
 import { runTemplate } from "./index";
 
 // Type for template run functions
@@ -34,10 +34,10 @@ export async function getTemplate(id: string): Promise<TemplateRun> {
 
 /**
  * Dev-only guard to catch missing template implementations
- * Asserts that all template IDs in the JSON registry are implemented
+ * Asserts that all template IDs in the TS registry are implemented
  */
 (function devAssertTemplates() {
-  if (import.meta.env?.DEV) {
+  if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
     const wanted = Object.values(templateConfig)
       .map((x: any) => x.templateId)
       .filter(Boolean) as string[];
