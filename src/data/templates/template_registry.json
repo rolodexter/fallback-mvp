@@ -1,13 +1,21 @@
 {
+  "business_units": {
+    "schemaId": "bu_v1",
+    "summaryFn": "performanceSummary",
+    "groundingNarrativeId": "business_units_intro",
+    "templateId": "business_units_snapshot_yoy_v1"
+  },
   "performance": {
     "schemaId": "perf_v1",
     "summaryFn": "performanceSummary",
-    "groundingNarrativeId": "performance_intro"
+    "groundingNarrativeId": "performance_intro",
+    "templateId": "monthly_gross_trend_v1"
   },
   "counterparties": {
     "schemaId": "cp_v1",
     "summaryFn": "counterpartySummary",
-    "groundingNarrativeId": "counterparty_intro"
+    "groundingNarrativeId": "counterparty_intro",
+    "templateId": "top_counterparties_gross_v1"
   },
   "risk": {
     "schemaId": "risk_v1",

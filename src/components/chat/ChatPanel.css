@@ -3,7 +3,7 @@
   border-radius: 8px;
   padding: 16px;
   background-color: #f9f9f9;
-  height: 500px;
+  height: 720px; /* increased for readability */
   display: flex;
   flex-direction: column;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -48,17 +48,30 @@
   border-radius: 8px;
   max-width: 80%;
   position: relative;
+  color: #2d3748; /* high-contrast for light background */
+  font-size: 0.95rem;
+  line-height: 1.4;
 }
 
 .user-message {
   background-color: #e9f5ff;
   align-self: flex-end;
   margin-left: auto;
+  color: #1e40af; /* readable blue tint on light bg */
 }
 
 .bot-message {
   background-color: #f0f4fa;
   align-self: flex-start;
+  color: #1f2937; /* readable on light bg */
+}
+
+/* Dark mode support: increase contrast on dark backgrounds */
+@media (prefers-color-scheme: dark) {
+  .chat-messages { background-color: #0f172a; border-color: #1f2937; }
+  .chat-message { color: #e0e0e0; }
+  .user-message { background-color: #0b2540; color: #cce5ff; }
+  .bot-message { background-color: #14213a; color: #f5f5f5; }
 }
 
 .error-message {
@@ -73,6 +86,7 @@
 .message-content {
   margin-bottom: 4px;
   word-break: break-word;
+  white-space: pre-wrap; /* preserve paragraphs and newlines */
 }
 
 .message-time {
@@ -149,4 +163,53 @@
   background-color: #cbd5e0;
   cursor: not-allowed;
   opacity: 0.7;
+}
+
+/* Widget rail (exactly one row of 5, horizontal scroll on narrow screens) */
+.widget-rail {
+  display: flex;
+  flex-wrap: nowrap; /* force single row */
+  gap: 12px;
+  margin-bottom: 16px;
+  overflow-x: auto; /* allow horizontal scrolling */
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  padding-bottom: 4px; /* space for scrollbar */
+}
+
+.rail-card {
+  min-height: 100px;
+  min-width: 220px; /* ensure visible width for horizontal scroll */
+  flex: 0 0 220px; /* fixed card width in the strip */
+  scroll-snap-align: start;
+}
+
+/* Skeleton shimmer */
+.skeleton {
+  position: relative;
+}
+
+.skeleton-line {
+  height: 12px;
+  background: #eef1f5;
+  border-radius: 6px;
+  margin: 8px 0;
+  overflow: hidden;
+}
+
+.skeleton-line.short { width: 60%; }
+
+.skeleton-line::after {
+  display: none; /* Disable distracting shimmer */
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(300%); }
+}
+
+/* Bubble width polish */
+.chat-message {
+  max-width: 720px;
 }

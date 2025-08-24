@@ -10,9 +10,20 @@ if (import.meta.env.MODE === 'development') {
   import('./mocks/browser').then(({ worker }) => {
     console.log('Initializing mock service worker...');
     worker.start({
-      onUnhandledRequest: 'bypass'
+      onUnhandledRequest: 'bypass',
+      serviceWorker: {
+        url: '/mockServiceWorker.js'
+      }
+    }).then(() => {
+      console.log('🟢 Mock Service Worker started successfully');
+      // Make MSW status available globally for debugging
+      window.__riskillDebug = window.__riskillDebug || {};
+      window.__riskillDebug.mswActive = true;
     }).catch((error) => {
       console.error('Failed to initialize MSW worker:', error);
+      window.__riskillDebug = window.__riskillDebug || {};
+      window.__riskillDebug.mswActive = false;
+      window.__riskillDebug.mswError = error?.message;
     });
   }).catch(error => {
     console.error('Failed to import MSW worker:', error);

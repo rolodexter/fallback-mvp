@@ -1,6 +1,7 @@
 /**
  * Topic router module for determining template_id from detected domains
  * Used to map detected domains to specific templates
+ * Stage-A: Deterministic routes for canonical prompts
  */
 
 import { RouterResult } from './router';
@@ -11,6 +12,56 @@ export type TopicRouterResult = {
   params: Record<string, any>;
 };
 
+export type RouteHit = { domain?: string; template_id?: string; params?: Record<string, any> };
+
+// Accept both abbreviations and full names, normalize to full month name
+const MONTHS_MAP: Record<string, string> = {
+  jan: 'january', january: 'january',
+  feb: 'february', february: 'february',
+  mar: 'march', march: 'march',
+  apr: 'april', april: 'april',
+  may: 'may',
+  jun: 'june', june: 'june',
+  jul: 'july', july: 'july',
+  aug: 'august', august: 'august',
+  sep: 'september', sept: 'september', september: 'september',
+  oct: 'october', october: 'october',
+  nov: 'november', november: 'november',
+  dec: 'december', december: 'december'
+};
+
+/**
+ * Deterministically route a message to the correct template
+ * Stage-A: Hard-coded routes for canonical prompts
+ * @param msg The user message to route
+ * @returns Object with domain, template_id and params
+ */
+export function routeMessage(msg: string): RouteHit {
+  const m = (msg||'').toLowerCase().trim();
+
+  const bu = m.match(/\b(z0\d{2}|z\d{3})\b/);
+  const monKey = Object.keys(MONTHS_MAP).find(x => m.includes(x));
+  const mon = monKey ? MONTHS_MAP[monKey] : undefined;
+  if (bu && mon && m.includes("snapshot")) {
+    return { domain:"business_units", template_id:"business_units_snapshot_yoy_v1", params:{ bu: bu[0].toUpperCase(), month: mon } };
+  }
+
+  if (m.includes("counterparties") && (m.includes("ytd") || m.includes("year to date"))) {
+    return { domain:"counterparties", template_id:"top_counterparties_gross_v1", params:{ range:"ytd" } };
+  }
+
+  if (m.includes("monthly") && (m.includes("gross") || m.includes("trend"))) {
+    return { domain:"performance", template_id:"monthly_gross_trend_v1", params:{ window:"24m" } };
+  }
+
+  // Synonym: list all business units -> profitability summary (contains BU list in mock)
+  if (m.includes("list") && (m.includes("business units") || m.includes("bus"))) {
+    return { domain: "profitability", template_id: "profitability_summary_v1", params: {} };
+  }
+
+  return {}; // Intro/nodata
+}
+
 /**
  * Route a detected domain to a specific template with params
  * @param routerResult The result from the router
@@ -18,38 +69,44 @@ export type TopicRouterResult = {
  * @returns Object with domain, template_id and params
  */
 export function routeToTemplate(routerResult: RouterResult, message: string): TopicRouterResult {
+  // First, use deterministic routing for canonical prompts
+  const deterministicRoute = routeMessage(message);
+  
+  // If we have a deterministic route, use that
+  if (deterministicRoute.domain && deterministicRoute.template_id) {
+    return {
+      domain: deterministicRoute.domain,
+      template_id: deterministicRoute.template_id,
+      params: deterministicRoute.params || {}
+    };
+  }
+  
+  // Fall back to domain-based routing
   const { domain } = routerResult;
-  const m = message.toLowerCase();
   
   // Default response with no template
   if (domain === 'none') {
     return { domain, template_id: '', params: {} };
   }
   
-  // Performance domain templates
+  // Regular performance domain templates
   if (domain === 'performance') {
-    // Default performance template
-    return { domain, template_id: 'performance_summary_v1', params: {} };
+    return { domain, template_id: 'monthly_gross_trend_v1', params: {} };
   }
   
-  // Counterparties domain templates
+  // Regular counterparties domain templates
   if (domain === 'counterparties') {
-    return { domain, template_id: 'top_counterparties_v1', params: {} };
-  }
-  
-  // Risk domain templates
-  if (domain === 'risk') {
-    return { domain, template_id: 'risk_assessment_v1', params: {} };
+    return { domain, template_id: 'top_counterparties_gross_v1', params: {} };
   }
   
   // Regional performance
-  if (domain === 'regional' || m.includes("regional") || m.includes("regions")) {
-    return { domain: "regional", template_id: "regional_performance_v1", params: { window: "24m" } };
+  if (domain === 'regional') {
+    return { domain, template_id: 'regional_performance_v1', params: { window: '24m' } };
   }
   
   // Profitability summary
-  if (domain === 'profitability' || m.includes("profit") || m.includes("margin") || m.includes("profitability")) {
-    return { domain: "profitability", template_id: "profitability_summary_v1", params: {} };
+  if (domain === 'profitability') {
+    return { domain, template_id: 'profitability_summary_v1', params: {} };
   }
   
   // Default to domain-named template if exists

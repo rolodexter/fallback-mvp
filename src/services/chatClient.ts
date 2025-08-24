@@ -1,12 +1,8 @@
 /**
- * Chat client service to handle API calls to both Netlify and Vercel endpoints
- * This service automatically selects the appropriate endpoint based on the current deployment platform
- * Includes support for grounded chat with domain detection and templates
+ * ChatClient service for Stage-A contract
  */
 
-import { detectTopic } from "../data/router/router";
-import { runTemplate } from "../data/templates";
-import { executeBigQuery } from "./bigQueryClient";
+// Stage-A: no router/detect imports here; payload is pre-routed by UI
 
 // Request and response type definitions
 export type ChatResponse = {
@@ -34,6 +30,8 @@ declare global {
     __riskillDebug: {
       endpoint: string;
       platform: string;
+      mswActive?: boolean;
+      mswError?: string;
       routerDomain?: string;
       routerConfidence?: number;
       routerGroundingType?: string;
@@ -250,216 +248,43 @@ export const chatClient = {
     return initResult;
   },
 
-  /**
-   * Build a grounded request payload with domain detection, BigQuery data, and template output
-   * @param userText The user message
-   * @param history Array of previous messages in the conversation
-   * @returns A grounded request payload
-   */
-  async buildGroundedRequest(userText: string, history: Array<{role: "user" | "assistant", content: string}> = []) {
-    // Detect the topic from the user message
-    const detection = detectTopic(userText);
-    
-    let bigQueryData = null;
-    let groundingType = detection?.groundingType ?? null;
-    let tmpl: { kpiSummary: string | null, templateOutput: string | null } = { kpiSummary: null, templateOutput: null };
-    
-    // Get BigQuery data if we have a valid domain
-    if (detection?.domain && detection.domain !== 'none') {
-      try {
-        // Map domain to BigQuery template ID
-        const templateMap: Record<string, string> = {
-          'performance': 'business_units_snapshot_yoy_v1',
-          'counterparties': 'customers_top_n',
-          'risk': 'risks_summary',
-          'profitability': 'profitability_by_business_unit_v1',
-          'regional': 'regional_revenue_trend_24m_v1'
-        };
-        
-        const templateId = templateMap[detection.domain];
-        
-        if (templateId) {
-          // Execute BigQuery query based on domain
-          let params = {};
-          
-          // Set parameters based on user query
-          if (templateId === 'customers_top_n') {
-            params = { limit: 5 };
-          } else if (templateId === 'profitability_by_business_unit_v1') {
-            const currentYear = new Date().getFullYear();
-            params = { year: currentYear - 1 };
-          } else if (templateId === 'regional_revenue_trend_24m_v1') {
-            params = {}; // No parameters needed, but could add region filter if specified in message
-          }
-          
-          // Get data from BigQuery
-          const response = await executeBigQuery(templateId, params);
-          
-          if (response.success && response.rows && response.rows.length > 0) {
-            // Store BigQuery data for grounding
-            bigQueryData = response.rows;
-          } else {
-            // No data or error, set grounding type to no_data
-            groundingType = 'no_data';
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching BigQuery data:', error);
-        groundingType = 'no_data';
-      }
-    }
-    
-    // Get the template output
-    const store = {}; // Replace with actual store if available
-    if (detection?.domain) {
-      tmpl = await runTemplate(detection.domain, store);
-    }
-    
-    // Build the grounding payload
-    const grounding: GroundingPayload = {
-      domain: detection?.domain ?? null,
-      confidence: detection?.confidence ?? 0,
-      groundingType: groundingType,
-      kpiSummary: tmpl?.kpiSummary ?? null,
-      templateOutput: tmpl?.templateOutput ?? null,
-      bigQueryData: bigQueryData
-    };
-    
-    // Update debug info if available
-    if (typeof window !== 'undefined' && window.__riskillDebug) {
-      window.__riskillDebug.routerDomain = detection?.domain ?? '';
-      window.__riskillDebug.routerConfidence = detection?.confidence ?? 0;
-      window.__riskillDebug.routerGroundingType = groundingType ? String(groundingType) : '';
-    }
-    
-    return {
-      message: userText,
-      history,  // pass short rolling window (last 6 turns)
-      grounding,
-    };
-  },
-  
-  /**
-   * Send a chat message to the API and receive a response
-   * @param params - The parameters for sending a chat
-   * @param params.message - The message to send
-   * @param params.chatHistory - The chat history
-   * @param params.router - The router context with domain and confidence
-   * @param params.template - The template ID
-   * @returns The chat response with text and mode
-   */
-  async sendChat(params: {
-    message: string;
-    chatHistory?: Array<{type: string; text: string}>;
-    router?: {domain: string; confidence: number};
-    template?: string;
-  }) {
-    const { message, chatHistory, router, template } = params;
-    
-    if (!this.initialized) {
-      const initResult = await this.init();
-      if (!initResult.success) {
-        console.error('Failed to initialize chat client:', initResult.message);
-        window.__riskillDebug.lastError = 'Init failed: ' + initResult.message;
-        return { mode: 'nodata', text: 'Service unavailable' };
-      }
-    }
-    
-    // Ensure we have a chat endpoint before continuing
-    if (!this.endpoint) {
-      console.error('No chat endpoint configured');
-      window.__riskillDebug.lastError = 'No chat endpoint configured';
-      return { mode: 'nodata', text: 'Service unavailable' };
-    }
-    
-    const history = chatHistory?.map(msg => ({
-      role: msg.type === 'user' ? 'user' : 'assistant',
-      content: msg.text
-    })) || [];
-    
-    // Update debug info with router domain and confidence
-    if (router) {
-      window.__riskillDebug.routerDomain = router.domain;
-      window.__riskillDebug.routerConfidence = router.confidence;
-      window.__riskillDebug.groundingType = 'router';
-    }
-    
-    // Track request time for verification
-    const requestTime = new Date().toISOString();
-    window.__riskillDebug.lastRequestTime = requestTime;
-    window.__riskillDebug.lastRequestEndpoint = this.endpoint;
-    
-    try {
-      // Always send to serverless endpoint
-      const response = await fetch(this.endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message,
-          history,
-          router,
-          template
-        })
-      });
-      
-      // Track response time for verification
-      window.__riskillDebug.lastResponseTime = new Date().toISOString();
-      window.__riskillDebug.lastResponseStatus = response.status;
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`Error from ${this.endpoint}:`, response.status, errorText);
-        window.__riskillDebug.lastError = `${response.status}: ${errorText.substring(0, 100)}`;
-        
-        try {
-          // Try to parse error as JSON
-          const errorJson = JSON.parse(errorText);
-          if (errorJson.mode === 'nodata') {
-            return errorJson; // Return structured nodata response
-          }
-        } catch (e) {
-          // Not JSON, continue to default error
-        }
-        
-        return { mode: 'nodata', text: 'Service unavailable' };
-      }
-      
-      const data = await response.json();
-      
-      // Handle structured response format
-      if (data.mode === 'nodata') {
-        return data;
-      }
-      
-      // Update debug with metadata
-      if (data.meta) {
-        window.__riskillDebug.responseDomain = data.meta.domain;
-        window.__riskillDebug.responseGroundingType = data.meta.groundingType;
-        window.__riskillDebug.responseConfidence = data.meta.confidence;
-      }
-      
-      return { 
-        text: data.text || data.reply || 'No response from server',
-        mode: data.mode || 'chat'
-      };
-    } catch (error) {
-      console.error('[ChatClient] Chat API error:', error);
-      return {
-        text: 'Service unavailable. Please try again later.',
-        error: error instanceof Error ? error.message : 'Unknown error occurred',
-        meta: {
-          domain: null,
-          confidence: 0,
-          groundingType: 'no_data'
-        },
-        mode: 'nodata',
-        reason: 'network_error'
-      };
-    }
-  },
-  
-  // Deprecated sendMessage method has been removed
-  // Use sendChat instead
 };
+
+// Minimal Stage-A types and sender
+export type ChatPayload = {
+  message: string;
+  router?:   { domain?: string };
+  template?: { id?: string };
+  params?:   Record<string, any>;
+  endpoint?: string;
+};
+
+export type Answer = {
+  mode: "strict" | "abstain" | "nodata";
+  text: string;
+  kpis?: { label: string; value: string }[];
+  provenance?: { source?: string; template_id?: string; snapshot?: string };
+  coverage?: any;
+  confidence?: "high" | "medium" | "low";
+};
+
+export async function sendChat(p: ChatPayload): Promise<Answer> {
+  const endpoint = p.endpoint ||
+    (import.meta.env.VITE_DEPLOY_PLATFORM === 'netlify' ? '/.netlify/functions/chat' : '/api/chat');
+  const body = {
+    message: p.message,
+    router:   { domain: p.router?.domain },
+    template: { id: p.template?.id },
+    params:   p.params ?? {}
+  };
+  console.info('[SUBMIT]', { body, endpoint });
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(`chatClient: ${res.status}`);
+  const ans = await res.json();
+  console.info('[ANSWER]', ans);
+  return ans as Answer;
+}

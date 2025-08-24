@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { chatClient } from '../../services/chatClient';
-import { routeMessage } from '../../data/router/router';
-import { getTemplateSummaryFunction } from '../../data/templates';
+import { sendChat, type Answer, type ChatPayload } from '@/services/chatClient';
+import { routeMessage } from '@/data/router/topicRouter';
 import { verifyChatClientConfig } from '../../services/verify';
+import '@/components/widgets/Widget.css';
+import './ChatPanel.css';
 
 type MessageType = 'user' | 'bot' | 'error';
 
@@ -11,6 +12,62 @@ type Message = {
   text: string;
   type: MessageType;
   timestamp: Date;
+};
+
+// Simple 5-card rail based on current domain, with skeletons to avoid layout shift
+const WidgetRail: React.FC<{ domain?: string; loading?: boolean }> = ({ domain, loading }) => {
+  const getTitles = (d?: string): string[] => {
+    switch (d) {
+      case 'business_units':
+        return [
+          'YoY BU sparkline',
+          'Top BU Δ',
+          'Last month gross',
+          'MoM Δ',
+          'Coverage'
+        ];
+      case 'counterparties':
+        return [
+          'Top 3 counterparties',
+          'YTD gross',
+          'New vs returning',
+          'Concentration index',
+          'Coverage'
+        ];
+      case 'performance':
+        return [
+          '12/24m bar+line',
+          'Last 3-m Δ%',
+          'Seasonality hint',
+          'Last outlier month',
+          'Coverage'
+        ];
+      default:
+        return [
+          'Overview',
+          'Trend',
+          'Top movers',
+          'Recent change',
+          'Coverage'
+        ];
+    }
+  };
+  const titles = getTitles(domain);
+  return (
+    <div className="widget-rail">
+      {titles.map((t, i) => (
+        <div key={i} className="widget rail-card">
+          <div className="widget-header">
+            <h3 className="widget-title">{t}</h3>
+          </div>
+          <div className={"widget-content" + (loading ? ' skeleton' : '')}>
+            <div className="skeleton-line" />
+            <div className="skeleton-line short" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 };
 
 // Chat history format required by chatClient.sendChat
@@ -25,7 +82,6 @@ const ChatPanel: React.FC = () => {
   const [chatHistory, setChatHistory] = useState<ChatHistoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [domain, setDomain] = useState<string | undefined>(undefined);
-  const [routerConfidence, setRouterConfidence] = useState<number>(0);
   const [templateId, setTemplateId] = useState<string>('');
   const [showDebug, setShowDebug] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -46,23 +102,17 @@ const ChatPanel: React.FC = () => {
     };
     
     // Verify configuration and initialize debug info
-    const { platform, endpointHint, debug } = verifyChatClientConfig();
+    const { platform, endpointHint } = verifyChatClientConfig();
     
     // Make config available globally for debugging
     window.__riskillDebug = window.__riskillDebug || {};
     window.__riskillDebug.platform = platform;
     window.__riskillDebug.endpoint = endpointHint;
-    window.__riskillDebug.debug = debug;
-    
-    // Initialize chatClient with verified config
-    const initClient = async () => {
-      // Pass the verified endpoint if needed
-      await chatClient.init(endpointHint);
-    };
+    // Skip setting debug if it's not available
     
     window.addEventListener('popstate', checkDebugMode);
     checkDebugMode();
-    initClient();
+    // No client init required when using named sendChat
     
     return () => {
       window.removeEventListener('popstate', checkDebugMode);
@@ -72,6 +122,62 @@ const ChatPanel: React.FC = () => {
   // Generate a unique ID for messages
   const generateId = (): string => {
     return Date.now().toString(36) + Math.random().toString(36).substr(2);
+  };
+
+  // Example chip suggestions for intro/nodata responses
+  const exampleChips = [
+    'Z001 June snapshot',
+    'Top counterparties YTD',
+    'Monthly gross trend'
+  ];
+
+  // Handle chip click
+  const handleChipClick = (chipText: string) => {
+    setMessage(chipText);
+  };
+
+  // Narrow Answer shape the UI renderer needs
+  type RenderableAnswer = Pick<Answer, 'text' | 'kpis'>;
+
+  // Function to render an answer to the chat
+  const renderAnswer = (ans: RenderableAnswer) => {
+    if (!ans || !ans.text) {
+      const errorMessage: Message = {
+        id: generateId(),
+        text: "No answer text returned. Check /api/chat and network payload.",
+        type: 'error',
+        timestamp: new Date()
+      };
+      setMessages(prevMessages => [...prevMessages, errorMessage]);
+      return;
+    }
+
+    // Render the main answer text
+    const botMessage: Message = {
+      id: generateId(),
+      text: ans.text,
+      type: 'bot',
+      timestamp: new Date()
+    };
+    setMessages(prevMessages => [...prevMessages, botMessage]);
+    
+    // Include KPIs if provided
+    if (Array.isArray(ans.kpis) && ans.kpis.length) {
+      const kpiText = ans.kpis.map(k => `• ${k.label}: ${k.value}`).join('\n');
+      const kpiMessage: Message = {
+        id: generateId(),
+        text: kpiText,
+        type: 'bot',
+        timestamp: new Date()
+      };
+      setMessages(prevMessages => [...prevMessages, kpiMessage]);
+    }
+
+    // Update chat history with the new exchange
+    setChatHistory(prev => [
+      ...prev,
+      { role: 'assistant', content: ans.text }
+    ]);
   };
 
   // Handle send message
@@ -86,96 +192,64 @@ const ChatPanel: React.FC = () => {
       timestamp: new Date()
     };
 
-    // Route the message to determine domain
-    const routeResult = routeMessage(message);
-    setRouterConfidence(routeResult.confidence);
-    const nextDomain = routeResult.domain !== 'none' ? routeResult.domain : undefined;
+    // Add message to UI
+    setMessages(prevMessages => [...prevMessages, userMessage]);
+    setIsLoading(true);
+    setMessage('');
     
-    // Add strict client fallback for non-domain messages
-    if (!nextDomain || routeResult.domain === 'none') {
-      console.info('[ChatPanel] No domain detected, showing intro/nodata locally');
+    // Update chat history
+    setChatHistory(prev => [...prev, { role: 'user', content: message }]);
+
+    // Determine the endpoint based on platform
+    const endpoint = (import.meta.env.VITE_DEPLOY_PLATFORM === "netlify")
+      ? "/.netlify/functions/chat"
+      : "/api/chat";
+
+    // Step 1: Deterministic routing for canonical prompts
+    const r = routeMessage(message);
+    console.info('[ROUTE]', r);
+    
+    // If no valid route, show intro message
+    if (!r?.domain || !r.template_id) {
+      console.info('[ChatPanel] No domain/template detected, showing intro/nodata locally');
+      setIsLoading(false);
       
-      // Show intro/nodata locally and return
+      // Show intro/nodata with example chips and scope hint
       const introMessage: Message = {
         id: generateId(),
-        text: "Try asking about Business Units (YoY), Top Counterparties, or Monthly Gross Trend.",
+        text: "Stage-A (mock): deterministic answers for BU snapshot, counterparties YTD, monthly gross trend.",
         type: 'bot',
         timestamp: new Date()
       };
       
-      setMessages(prev => [...prev, userMessage, introMessage]);
-      setMessage('');
+      setMessages(prev => [...prev, introMessage]);
       return;
     }
     
-    // Get template if domain is valid
-    if (nextDomain) {
-      const templateFn = getTemplateSummaryFunction(nextDomain);
-      if (templateFn) {
-        // Use template function for future summary display
-        setTemplateId(nextDomain);
-      }
-    }
-    
-    // Set the detected domain
-    setDomain(nextDomain);
-    
-    setMessages(prevMessages => [...prevMessages, userMessage]);
-    setIsLoading(true);
-    setMessage('');
+    // Update UI state with detected domain and template
+    setDomain(r.domain);
+    setTemplateId(r.template_id);
 
     try {
-      // Send message to API with routing context
-      const response = await chatClient.sendChat({
+      // Stage-A payload typing for compile-time safety
+      const payload: ChatPayload = {
         message,
-        chatHistory: chatHistory.map(entry => ({
-          type: entry.role === 'user' ? 'user' : 'bot',
-          text: entry.content
-        })),
-        router: routeResult,
-        template: nextDomain
-      });
+        router: { domain: r.domain },
+        template: { id: r.template_id },
+        params: r.params || {},
+        endpoint
+      };
 
-      // Handle successful response
-      if (response.text) {
-        const botMessage: Message = {
-          id: generateId(),
-          text: response.text,
-          type: 'bot',
-          timestamp: new Date()
-        };
-        
-        setMessages(prevMessages => [...prevMessages, botMessage]);
-        
-        // Update domain if it was detected
-        if (response.meta?.domain) {
-          setDomain(response.meta.domain);
-        }
-        
-        // Update chat history with the new exchange
-        setChatHistory(prev => [
-          ...prev,
-          { role: 'user', content: message },
-          { role: 'assistant', content: response.text }
-        ]);
-      }
-      
-      // Handle error in the response
-      if (response.error) {
-        const errorMessage: Message = {
-          id: generateId(),
-          text: `Error: ${response.error}`,
-          type: 'error',
-          timestamp: new Date()
-        };
-        
-        setMessages(prevMessages => [...prevMessages, errorMessage]);
-      }
+      const answer: Answer = await sendChat(payload);
+      console.info('[ANSWER]', answer);
+      renderAnswer(answer);
     } catch (error) {
-      // Handle unexpected errors
+      // Handle error in the response
+      console.error('[ChatPanel] Error:', error);
+      
       const errorMessage: Message = {
         id: generateId(),
-        text: `Something went wrong: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
         type: 'error',
         timestamp: new Date()
       };
@@ -195,7 +269,9 @@ const ChatPanel: React.FC = () => {
     <div className="chat-panel">
       <div className="chat-header">
         <h2>Chat Assistant</h2>
-        {domain && <div className="chat-domain">Domain: {domain}</div>}
+        {import.meta.env.MODE === 'development' && domain && (
+          <div className="chat-domain">Domain: {domain}</div>
+        )}
         
         {/* Debug overlay */}
         {showDebug && (
@@ -204,23 +280,48 @@ const ChatPanel: React.FC = () => {
             <div><strong>Endpoint:</strong> {window.__riskillDebug?.endpoint || 'Not set'}</div>
             <div><strong>Platform:</strong> {window.__riskillDebug?.platform || 'Not detected'}</div>
             <div><strong>Router Domain:</strong> {domain || 'none'}</div>
-            <div><strong>Router Confidence:</strong> {routerConfidence.toFixed(2)}</div>
             <div><strong>Template ID:</strong> {templateId || 'none'}</div>
             <div><strong>Chat History:</strong> {chatHistory.length} messages</div>
           </div>
         )}
       </div>
+      {/* Top 5-card rail: responsive, always renders exactly five cards */}
+      <WidgetRail domain={domain} loading={isLoading} />
       
       <div className="chat-messages">
         {messages.length === 0 ? (
           <div className="chat-welcome">
             <p>Welcome to the Finance Assistant!</p>
             <p>How can I help you with your financial data?</p>
+            <div className="example-chips">
+              {exampleChips.map((chip, index) => (
+                <button 
+                  key={index} 
+                  className="chip" 
+                  onClick={() => handleChipClick(chip)}
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           messages.map((msg) => (
             <div key={msg.id} className={`chat-message ${msg.type}-message`}>
               <div className="message-content">{msg.text}</div>
+              {msg.type === 'bot' && msg.text.includes("Stage-A") && (
+                <div className="example-chips">
+                  {exampleChips.map((chip, index) => (
+                    <button 
+                      key={index} 
+                      className="chip" 
+                      onClick={() => handleChipClick(chip)}
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="message-time">{formatTime(msg.timestamp)}</div>
             </div>
           ))

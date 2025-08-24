@@ -11,4 +11,5 @@ if (import.meta.env.MODE === 'production') {
 } else {
   // Start the worker in development mode
   console.log('MSW starting in development mode');
+  // We don't call worker.start() here because it will be called in main.tsx
 }
