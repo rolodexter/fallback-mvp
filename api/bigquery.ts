@@ -16,8 +16,7 @@ type NextApiResponse = {
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Initialize BigQuery client
-const bigquery = new BigQuery();
+// Lazily initialize BigQuery client only when executing queries (to avoid Stage-A init)
 
 interface BigQueryRequest {
   template_id: string;
@@ -74,6 +73,7 @@ const executeBigQuery = async (
   params: Record<string, any> = {}
 ): Promise<BigQueryResponse> => {
   try {
+    const bigquery = new BigQuery();
     // Get SQL template
     const sqlTemplate = readSqlTemplate(templateId);
     
@@ -122,6 +122,13 @@ export default async function handler(
     return;
   }
   
+  // Stage-A guard: only allow BigQuery when explicitly set to 'bq'
+  const dataMode = process.env.DATA_MODE ?? 'mock';
+  if (dataMode !== 'bq') {
+    res.status(200).json({ mode: 'abstain', provenance: { source: 'mock' } });
+    return;
+  }
+
   // Only allow POST method
   if (req.method !== 'POST') {
     res.status(405).json({

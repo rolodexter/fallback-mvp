@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import { callLLMProvider } from '../src/services/llmProvider';
 import { routeMessage } from '../src/data/router/router';
 import { runTemplate } from '../src/data/templates';
+import templateRegistry from '../src/data/templates/template_registry.json';
 
 // Supported data modes
 type DataMode = 'mock' | 'live';
@@ -96,7 +97,26 @@ export default async function handler(
     // Parse the request body safely
     const body = (request as any).body ?? {};
     const { message, history, grounding, router, template, params } = body as ChatRequest;
-    
+    // Normalize template id from hint
+    const providedTemplateId = getTemplateId(template);
+    // If client supplied a template id that is not present in registry, short-circuit in Stage-A
+    if (providedTemplateId) {
+      const registryTemplateIds = Object.values(templateRegistry)
+        .map((v: any) => v?.templateId)
+        .filter((x: any): x is string => typeof x === 'string');
+      if (!registryTemplateIds.includes(providedTemplateId)) {
+        return response.status(200).json({
+          mode: 'nodata',
+          text: 'No mock template available for this id.',
+          provenance: {
+            source: dataMode,
+            reason: 'missing_template',
+            template_id: providedTemplateId
+          }
+        });
+      }
+    }
+
     if (!message || typeof message !== 'string') {
       return response.status(200).json({ 
         mode: 'nodata', 
@@ -112,7 +132,6 @@ export default async function handler(
       : serverRoute;
 
     // For Stage-A we use domain (not template id) to run templates; keep template id only for provenance
-    const providedTemplateId = getTemplateId(template);
     const domainToUse = routeResult.domain !== 'none' ? routeResult.domain : undefined;
     
     // Safety check - if router returns 'none' domain, return nodata response immediately
@@ -208,24 +227,8 @@ export default async function handler(
     if (templateOutput) {
       // In mock mode or when using templates directly, we can use the template output directly
       if (dataMode === 'mock') {
+        // Stage-A: never call LLM/polish when in mock mode
         responseText = templateOutput;
-        
-        // Optionally polish the narrative if needed
-        if (process.env.POLISH_NARRATIVE === 'true') {
-          try {
-            const polishingPrompt = `Rewrite this text for clarity. Do not change numbers, KPIs, or fields. Here's the text:\n\n${templateOutput}`;
-            const polishedText = await callLLMProvider(polishingPrompt, 'You are an editor helping to improve text clarity while preserving all facts and figures exactly as provided.', [], null, null);
-            
-            if (polishedText) {
-              responseText = polishedText;
-              console.log('Narrative polished successfully');
-            }
-          } catch (err) {
-            console.warn('Failed to polish narrative, using template text directly:', err);
-            // Fall back to template output
-            responseText = templateOutput;
-          }
-        }
       } else {
         // In live mode, use the template output to guide the LLM
         systemPrompt = `You are Riskill, a financial data analysis assistant. Answer the question using ONLY the data and text provided below. If you cannot answer the question with the provided data, say "I don't have that information available." DO NOT make up any data or statistics that are not provided.
