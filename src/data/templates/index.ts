@@ -4,6 +4,7 @@
  */
 
 import { executeBigQuery, mapDomainToTemplateId } from '../../services/bigQueryClient';
+import templateRegistry from './template_registry.json';
 
 type BusinessUnit = {
   business_unit: string;
@@ -429,7 +430,7 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
  * @returns The template registry object
  */
 export function getTemplateRegistry(): Record<string, any> {
-  return require('./template_registry.json');
+  return templateRegistry as Record<string, any>;
 }
 
 /**

@@ -285,7 +285,6 @@ BIGQUERY DATA:\n${resultsText}`;
   } catch (error) {
     console.error('Error processing request:', error);
     // Error message for logging only
-    const logErrorMessage = 'Error processing your request';
     
     if (error instanceof Error) {
       console.error(error.message);
