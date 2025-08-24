@@ -13,6 +13,7 @@
 ### Technical Challenges & Solutions
 - **Challenge**: Legacy Vercel configuration causing deployment failures
   - **Solution**: Modernized configuration using current Vercel best practices for SPA + API
+- **Challenge**: TypeScript errors in API files breaking serverless functions
   - **Solution**: Fixed type declarations and parameter ordering in LLM provider calls
 - **Challenge**: Blank page rendering when environment variables are missing
   - **Solution**: Created defensive boot guard with fallback values
