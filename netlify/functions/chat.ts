@@ -1,5 +1,4 @@
 import { Handler } from '@netlify/functions';
-import dotenv from 'dotenv';
 import { callLLMProvider } from '../../src/services/llmProvider';
 import { GroundingPayload } from '../../src/services/chatClient';
 import { routeMessage } from '../../src/data/router/router';
@@ -8,8 +7,7 @@ import { runTemplate } from '../../src/data/templates';
 // Supported data modes
 type DataMode = 'mock' | 'live';
 
-// Load environment variables
-dotenv.config();
+// No dotenv in serverless functions; rely on platform env
 
 type ChatRequest = {
   message: string;
