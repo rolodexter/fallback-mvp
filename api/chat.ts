@@ -10,23 +10,29 @@ type DataMode = 'mock' | 'live';
 // Load environment variables
 dotenv.config();
 
+// Normalize template hint from client (can be string or object with id)
+type TemplateHint = string | { id?: string } | null | undefined;
+const getTemplateId = (t: TemplateHint): string | undefined =>
+  typeof t === 'string' ? t : (t && typeof t === 'object' ? t.id : undefined);
+
 type ChatRequest = {
   message: string;
-  history?: Array<{role: "user" | "assistant", content: string}>;
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   grounding?: {
     domain: string | null;
     confidence: number;
-    groundingType: "intro" | "drilldown" | "no_data" | null;
+    groundingType: 'intro' | 'drilldown' | 'no_data' | null;
     kpiSummary?: string | null;
     templateOutput?: string | null;
     bigQueryData?: any[] | null;
   };
   router?: {
     domain: string;
-    confidence: number;
+    confidence?: number;
     [key: string]: any;
   };
-  template?: string;
+  template?: string | { id?: string };
+  params?: Record<string, any>;
 };
 
 export default async function handler(
@@ -52,42 +58,43 @@ export default async function handler(
     return response.status(405).json({ error: 'Method Not Allowed' });
   }
   
-  // Check which data mode we're in (mock or live)
-  const dataMode: DataMode = (process.env.DATA_MODE === 'mock' ? 'mock' : 'live');
+  // Check which data mode we're in (mock or live); default to mock for Stage-A
+  const dataMode: DataMode = ((process.env.DATA_MODE ?? 'mock') === 'live') ? 'live' : 'mock';
   console.log(`[Vercel] Using data mode: ${dataMode}`);
   
-  // Check for required environment variables
-  const requiredEnvVars = ['PROVIDER', 'PERPLEXITY_API_KEY'];
-  if (dataMode === 'live') {
-    requiredEnvVars.push('GOOGLE_APPLICATION_CREDENTIALS');
-  }
-  const missingVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
-  
-  if (missingVars.length > 0) {
-    console.error(`[ERROR] Missing required environment variables: ${missingVars.join(', ')}`);
-    return response.status(503).json({ 
-      mode: 'nodata',
-      reason: 'missing_env',
-      text: 'Service unavailable due to missing environment configuration.',
-      details: `Missing environment variables: ${missingVars.join(', ')}` 
-    });
-  }
-
-  // Validate provider value
-  const provider = process.env.PROVIDER;
-  if (provider !== 'perplexity') {
-    console.error(`[ERROR] Unsupported provider: ${provider}`);
-    return response.status(503).json({ 
-      mode: 'nodata',
-      reason: 'invalid_provider',
-      text: 'Service unavailable due to provider configuration issues.',
-      details: `Unsupported provider: ${provider}`
-    });
+  // Only require LLM-related env vars when actually needed (live mode or narrative polishing)
+  const requireLLM = (dataMode === 'live') || (process.env.POLISH_NARRATIVE === 'true');
+  if (requireLLM) {
+    const requiredEnvVars = ['PROVIDER', 'PERPLEXITY_API_KEY'];
+    if (dataMode === 'live') {
+      requiredEnvVars.push('GOOGLE_APPLICATION_CREDENTIALS');
+    }
+    const missingVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+    if (missingVars.length > 0) {
+      console.error(`[ERROR] Missing required environment variables: ${missingVars.join(', ')}`);
+      return response.status(503).json({ 
+        mode: 'nodata',
+        reason: 'missing_env',
+        text: 'Service unavailable due to missing environment configuration.',
+        details: `Missing environment variables: ${missingVars.join(', ')}` 
+      });
+    }
+    // Validate provider value when used
+    const provider = process.env.PROVIDER;
+    if (provider !== 'perplexity') {
+      console.error(`[ERROR] Unsupported provider: ${provider}`);
+      return response.status(503).json({ 
+        mode: 'nodata',
+        reason: 'invalid_provider',
+        text: 'Service unavailable due to provider configuration issues.',
+        details: `Unsupported provider: ${provider}`
+      });
+    }
   }
   
   try {
     // Parse the request body
-    const { message, history, grounding, router, template } = request.body as ChatRequest;
+    const { message, history, grounding, router, template, params } = request.body as ChatRequest;
     
     if (!message) {
       return response.status(400).json({ 
@@ -97,12 +104,18 @@ export default async function handler(
       });
     }
     
-    // Use incoming router context if provided, otherwise perform routing on the server
-    let routeResult = router || routeMessage(message);
-    let domainTemplate = template || (routeResult.domain !== 'none' ? routeResult.domain : undefined);
+    // Determine routing; if client router lacks confidence, compute on server
+    const serverRoute = routeMessage(message);
+    let routeResult = router && typeof router.domain === 'string'
+      ? { domain: router.domain, confidence: typeof router.confidence === 'number' ? router.confidence : serverRoute.confidence }
+      : serverRoute;
+
+    // For Stage-A we use domain (not template id) to run templates; keep template id only for provenance
+    const providedTemplateId = getTemplateId(template);
+    const domainToUse = routeResult.domain !== 'none' ? routeResult.domain : undefined;
     
     // Safety check - if router returns 'none' domain, return nodata response immediately
-    if (routeResult.domain === 'none' || routeResult.confidence < 0.3) {
+    if (!domainToUse || routeResult.confidence < 0.3) {
       console.info('[Vercel] No domain detected or low confidence, returning nodata response');
       return response.status(200).json({
         mode: 'nodata',
@@ -119,13 +132,13 @@ export default async function handler(
     // Generate grounding data if not provided in request
     let groundingData = grounding;
     
-    if (!groundingData && domainTemplate && routeResult.confidence >= 0.3) {
+    if (!groundingData && domainToUse && routeResult.confidence >= 0.3) {
       try {
-        console.info(`[Vercel] Generating grounding data for domain: ${domainTemplate}`);
-        const templateData = await runTemplate(domainTemplate, null);
+        console.info(`[Vercel] Generating grounding data for domain: ${domainToUse}`);
+        const templateData = await runTemplate(domainToUse, null);
         
         groundingData = {
-          domain: domainTemplate,
+          domain: domainToUse,
           confidence: routeResult.confidence,
           kpiSummary: templateData.kpiSummary || null,
           templateOutput: templateData.templateOutput || null,
@@ -139,13 +152,13 @@ export default async function handler(
     }
     
     // If we're in live mode and don't have BigQuery data yet, try template
-    if (dataMode === 'live' && !groundingData && domainTemplate && routeResult.confidence >= 0.3) {
+    if (dataMode === 'live' && !groundingData && domainToUse && routeResult.confidence >= 0.3) {
       try {
-        console.info(`[Vercel] Generating grounding data for domain: ${domainTemplate}`);
-        const templateData = await runTemplate(domainTemplate, null);
+        console.info(`[Vercel] Generating grounding data for domain: ${domainToUse}`);
+        const templateData = await runTemplate(domainToUse, null);
         
         groundingData = {
-          domain: domainTemplate,
+          domain: domainToUse,
           confidence: routeResult.confidence,
           kpiSummary: templateData.kpiSummary || null,
           templateOutput: templateData.templateOutput || null,
@@ -165,13 +178,14 @@ export default async function handler(
         text: 'I don\'t have the data you\'re looking for right now.',
         abstain_reason: 'no_grounding_data',
         meta: {
-          domain: domainTemplate,
+          domain: domainToUse,
           confidence: routeResult.confidence,
           groundingType: 'none'
         },
         provenance: {
           source: dataMode,
-          template_id: domainTemplate
+          template_id: providedTemplateId || domainToUse,
+          params: params || {}
         }
       });
     }
@@ -250,7 +264,7 @@ BIGQUERY DATA:\n${resultsText}`;
         console.warn('Failed to parse KPI data as JSON:', e);
       }
     }
-    
+
     // Prepare response
     return response.status(200).json({
       text: responseText,
@@ -262,8 +276,9 @@ BIGQUERY DATA:\n${resultsText}`;
         groundingType
       },
       provenance: {
-        template_id: domainTemplate,
-        source: dataMode
+        template_id: providedTemplateId || domainToUse,
+        source: dataMode,
+        params: params || {}
       }
     });
     
@@ -277,7 +292,7 @@ BIGQUERY DATA:\n${resultsText}`;
       // Don't expose sensitive error details to the client
       if (process.env.NODE_ENV === 'development') {
         // Log development error
-      console.error(`Development error: ${error.message}`);
+        console.error(`Development error: ${error.message}`);
       }
     }
     
