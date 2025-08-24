@@ -1,0 +1,12 @@
+{
+  "snapshot_date": "2025-06-30",
+  "diagnostics": { "min_month": "2024-07", "max_month": "2025-06", "row_count": 48, "null_rates": { "revenue": 0.0, "margin": 0.0 } },
+  "summary": { "revenue": 11600000, "margin": 3500000 },
+  "units": [
+    { "bu": "Navigation",       "revenue": 2890000, "margin": 870000 },
+    { "bu": "Liferafts",        "revenue": 4215000, "margin": 1260000 },
+    { "bu": "Firefighting",     "revenue": 3120000, "margin": 870000 },
+    { "bu": "Certification",    "revenue": 1750000, "margin": 505000 },
+    { "bu": "Training",         "revenue": 1800000, "margin": 540000 }
+  ]
+}

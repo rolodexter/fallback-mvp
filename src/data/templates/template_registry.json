@@ -17,11 +17,13 @@
   "profitability": {
     "schemaId": "profit_v1",
     "summaryFn": "profitabilitySummary",
-    "groundingNarrativeId": "profitability_intro"
+    "groundingNarrativeId": "profitability_intro",
+    "templateId": "profitability_summary_v1"
   },
   "regional": {
     "schemaId": "region_v1",
     "summaryFn": "regionalSummary",
-    "groundingNarrativeId": "regional_intro"
+    "groundingNarrativeId": "regional_intro",
+    "templateId": "regional_performance_v1"
   }
 }

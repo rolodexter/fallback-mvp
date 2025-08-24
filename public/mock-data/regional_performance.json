@@ -1,0 +1,11 @@
+{
+  "snapshot_date": "2025-06-30",
+  "diagnostics": { "min_month": "2024-07", "max_month": "2025-06", "row_count": 60, "null_rates": { "gross": 0.0 } },
+  "regions": [
+    { "region": "AMBA",      "gross_2024": 1980000, "gross_2025": 2060000 },
+    { "region": "Patagonia", "gross_2024": 740000,  "gross_2025": 756000  },
+    { "region": "Córdoba",   "gross_2024": 520000,  "gross_2025": 524000  },
+    { "region": "Mendoza",   "gross_2024": 410000,  "gross_2025": 416000  },
+    { "region": "Buenos Aires", "gross_2024": 860000, "gross_2025": 850000 }
+  ]
+}
