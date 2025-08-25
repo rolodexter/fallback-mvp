@@ -99,15 +99,19 @@ export default async function handler(
     // Lazy-load template registry to avoid module-init failures
     let templateRegistry: any;
     try {
-      const mod = await import('../src/data/templates/template_registry');
-      templateRegistry = mod.default;
+      const mod = await import('../src/data/templates/index.js');
+      if (typeof (mod as any).getTemplateRegistry === 'function') {
+        templateRegistry = (mod as any).getTemplateRegistry();
+      } else {
+        throw new Error('getTemplateRegistry not found');
+      }
     } catch (err) {
       return response.status(200).json({
         mode: 'abstain',
         text: 'Dependency unavailable',
         provenance: {
           source: dataMode,
-          tag: 'IMPORT_REGISTRY_FAIL',
+          tag: 'IMPORT_TEMPLATES_FAIL',
           error: err instanceof Error ? err.message : String(err)
         }
       });
@@ -142,7 +146,7 @@ export default async function handler(
     // Lazy-load router to avoid module-init failures
     let routeMessageFn: any;
     try {
-      const mod = await import('../src/data/router/router');
+      const mod = await import('../src/data/router/router.js');
       routeMessageFn = mod.routeMessage;
       if (typeof routeMessageFn !== 'function') throw new Error('routeMessage not found');
     } catch (err) {
@@ -188,7 +192,7 @@ export default async function handler(
         // Lazy-load templates module
         let runTemplateFn: any;
         try {
-          const mod = await import('../src/data/templates');
+          const mod = await import('../src/data/templates/index.js');
           runTemplateFn = mod.runTemplate;
           if (typeof runTemplateFn !== 'function') throw new Error('runTemplate not found');
         } catch (err) {
@@ -304,7 +308,7 @@ TEMPLATE OUTPUT:\n${templateOutput}`;
         // Lazy-load LLM provider
         let callLLMProvider: any;
         try {
-          ({ callLLMProvider } = await import('../src/services/llmProvider'));
+          ({ callLLMProvider } = await import('../src/services/llmProvider.js'));
         } catch (err) {
           return response.status(200).json({
             mode: 'abstain',
@@ -329,7 +333,7 @@ BIGQUERY DATA:\n${resultsText}`;
       // Lazy-load LLM provider
       let callLLMProvider: any;
       try {
-        ({ callLLMProvider } = await import('../src/services/llmProvider'));
+        ({ callLLMProvider } = await import('../src/services/llmProvider.js'));
       } catch (err) {
         return response.status(200).json({
           mode: 'abstain',
