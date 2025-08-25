@@ -84,6 +84,10 @@ interface BigQueryResponse {
     template_id?: string;
     params?: Record<string, any>;
     query?: string;
+    ms?: number;
+    jobId?: string;
+    dataset?: string;
+    location?: string;
   };
 }
 
