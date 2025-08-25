@@ -228,8 +228,8 @@ export default async function handler(
       params.year = new Date().getFullYear() - 1;
     }
     
-    // Set default limit for customers query if not provided
-    if (template_id === 'customers_top_n' && !params.limit) {
+    // Set default limit for counterparties queries if not provided
+    if ((template_id === 'customers_top_n' || template_id === 'top_counterparties_gross_v1') && !params.limit) {
       params.limit = 5;
     }
     
