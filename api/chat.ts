@@ -43,6 +43,22 @@ export default async function handler(request: VercelRequest, response: VercelRe
     });
   }
 
+  // 2b) Optional LLM rewrite (guarded, fast, non-blocking semantics)
+  const originalMessage = userMessage;
+  let message = userMessage;
+  let rewriteInfo: any = null;
+  try {
+    const { rewriteMessage } = await import('../src/services/semanticRewrite.js');
+    const out = await rewriteMessage(originalMessage);
+    const thresh = Number(process.env.LLM_REWRITE_CONFIDENCE ?? 0.6);
+    if (out && (out.confidence ?? 0) >= thresh) {
+      message = out.canonical;
+      rewriteInfo = { groundingType: 'llm_rewrite', rewriteConfidence: out.confidence, originalMessage, rewritten: message };
+    }
+  } catch (e) {
+    rewriteInfo = { groundingType: 'llm_rewrite', tag: 'LLM_REWRITE_FAIL', originalMessage };
+  }
+
   // 3) Lazy import the router with guard
   let routeMessage: undefined | ((x: string) => any);
   try {
@@ -60,7 +76,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
   // 4) Route the message
   let route: any;
   try {
-    route = await routeMessage(userMessage);
+    route = await routeMessage(message);
   } catch (e: any) {
     return response.status(200).json({
       mode: 'abstain',
@@ -125,7 +141,8 @@ export default async function handler(request: VercelRequest, response: VercelRe
         domain: route.domain,
         params: route.params,
         router_debug: route,
-        bq: bqDiag || undefined
+        bq: bqDiag || undefined,
+        ...(rewriteInfo ?? {})
       }
     });
   } catch (e: any) {
