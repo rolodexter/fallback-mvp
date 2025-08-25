@@ -43,17 +43,19 @@ export function routeMessage(msg: string): RouteHit {
   const monKey = Object.keys(MONTHS_MAP).find(x => m.includes(x));
   const mon = monKey ? MONTHS_MAP[monKey] : undefined;
   if (bu && mon && m.includes("snapshot")) {
-    // Build first-of-month ISO (YYYY-MM-01) using current year when not specified
+    // Build first-of-month ISO (YYYY-MM-01)
     const months = [
       'january','february','march','april','may','june','july','august','september','october','november','december'
     ];
-    const year = new Date().getFullYear();
+    // If a 4-digit year is present in the message, use it; otherwise default to previous year
+    const yearMatch = m.match(/\b(20\d{2}|19\d{2})\b/);
+    const inferredYear = yearMatch ? parseInt(yearMatch[1], 10) : (new Date().getFullYear() - 1);
     const monthIndex = months.indexOf(mon) + 1;
-    const monthIso = `${year}-${String(monthIndex).padStart(2,'0')}-01`;
+    const monthIso = `${inferredYear}-${String(monthIndex).padStart(2,'0')}-01`;
     return {
       domain: "business_units",
       template_id: "business_units_snapshot_yoy_v1",
-      params: { unit: bu[0].toUpperCase(), month: monthIso, year }
+      params: { unit: bu[0].toUpperCase(), month: monthIso, year: inferredYear }
     };
   }
 
