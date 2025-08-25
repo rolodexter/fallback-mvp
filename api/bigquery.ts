@@ -82,8 +82,6 @@ interface BigQueryResponse {
     message?: string;
     error?: string;
     template_id?: string;
-    params?: Record<string, any>;
-    query?: string;
     ms?: number;
     jobId?: string;
     dataset?: string;
@@ -107,9 +105,7 @@ const readSqlTemplate = (templateId: string): string => {
   }
 };
 
-// Deprecated: parameter substitution is now handled by BigQuery named params
-// (kept for reference, not used)
-const prepareSql = (sqlTemplate: string): string => sqlTemplate;
+// Note: parameter substitution is handled by BigQuery named params
 
 // Execute BigQuery
 const executeBigQuery = async (
