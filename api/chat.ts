@@ -123,18 +123,17 @@ export default async function handler(
         }
       });
     }
-    const serverRoute = routeMessageFn(message) || {};
-    const serverDomain = serverRoute && serverRoute.domain ? serverRoute.domain : 'none';
-    const serverConfidence = serverDomain !== 'none' ? 0.9 : 0;
-    let routeResult = (router && typeof router.domain === 'string')
-      ? { domain: router.domain, confidence: typeof router.confidence === 'number' ? router.confidence : serverConfidence }
-      : { domain: serverDomain, confidence: serverConfidence };
+    const route = routeMessageFn(message) || {};
+    const serverDomain = route && route.domain ? route.domain : 'none';
+    const serverConfidence = typeof route.confidence === 'number' ? route.confidence : (serverDomain !== 'none' ? 0.9 : 0);
+    const routeResult = { domain: serverDomain, confidence: serverConfidence };
 
-    // For Stage-A we use domain (not template id) to run templates; keep template id only for provenance
-    const domainToUse = routeResult.domain !== 'none' ? routeResult.domain : undefined;
-    
-    // Safety check - if router returns 'none' domain, return nodata response immediately
-    if (!domainToUse || routeResult.confidence < 0.3) {
+    // Pull deterministic template id and params from router
+    const templateId = route?.template_id as string | undefined;
+    const templateParams = (route && typeof route.params === 'object') ? route.params as Record<string, any> : {};
+
+    // If router failed to produce a domain, return nodata with guidance
+    if (serverDomain === 'none' || serverConfidence < 0.3) {
       console.info('[Vercel] No domain detected or low confidence, returning nodata response');
       return response.status(200).json({
         mode: 'nodata',
@@ -147,13 +146,23 @@ export default async function handler(
         }
       });
     }
+
+    // If no deterministic template id, abstain deterministically (Stage-A)
+    if (!templateId) {
+      return response.status(200).json({
+        mode: 'abstain',
+        text: 'No deterministic grounding available (Stage-A mock).',
+        provenance: { source: dataMode, tag: 'NO_GROUNDING', reason: 'router_or_template_missing', router_debug: route },
+        meta: { domain: serverDomain, confidence: routeResult.confidence, groundingType: 'none' }
+      });
+    }
     
     // Generate grounding data if not provided in request
     let groundingData = grounding;
     
-    if (!groundingData && domainToUse && routeResult.confidence >= 0.3) {
+    if (!groundingData && templateId && routeResult.confidence >= 0.3) {
       try {
-        console.info(`[Vercel] Generating grounding data for domain: ${domainToUse}`);
+        console.info(`[Vercel] Generating grounding data for template: ${templateId}`);
         // Lazy-load templates module
         let runTemplateFn: any;
         try {
@@ -171,10 +180,10 @@ export default async function handler(
             }
           });
         }
-        const templateData = await runTemplateFn(domainToUse, null, 'mock');
+        const templateData = await runTemplateFn(templateId, templateParams, 'mock');
         
         groundingData = {
-          domain: domainToUse,
+          domain: serverDomain,
           confidence: routeResult.confidence,
           kpiSummary: templateData.kpiSummary || null,
           templateOutput: templateData.templateOutput || null,
@@ -188,9 +197,9 @@ export default async function handler(
     }
     
     // If we're in live mode and don't have BigQuery data yet, try template
-    if (dataMode === 'live' && !groundingData && domainToUse && routeResult.confidence >= 0.3) {
+    if (dataMode === 'live' && !groundingData && templateId && routeResult.confidence >= 0.3) {
       try {
-        console.info(`[Vercel] Generating grounding data for domain: ${domainToUse}`);
+        console.info(`[Vercel] Generating grounding data for template: ${templateId}`);
         // Lazy-load templates module
         let runTemplateFn: any;
         try {
@@ -208,10 +217,10 @@ export default async function handler(
             }
           });
         }
-        const templateData = await runTemplateFn(domainToUse, null, 'mock');
+        const templateData = await runTemplateFn(templateId, templateParams, 'mock');
         
         groundingData = {
-          domain: domainToUse,
+          domain: serverDomain,
           confidence: routeResult.confidence,
           kpiSummary: templateData.kpiSummary || null,
           templateOutput: templateData.templateOutput || null,
@@ -231,14 +240,15 @@ export default async function handler(
         text: 'I don\'t have the data you\'re looking for right now.',
         abstain_reason: 'no_grounding_data',
         meta: {
-          domain: domainToUse,
+          domain: serverDomain,
           confidence: routeResult.confidence,
           groundingType: 'none'
         },
         provenance: {
           source: dataMode,
-          template_id: providedTemplateId || domainToUse,
-          params: params || {}
+          template_id: templateId,
+          params: templateParams,
+          router_debug: route
         }
       });
     }
@@ -315,26 +325,6 @@ BIGQUERY DATA:\n${resultsText}`;
     } else {
       // No grounding available
       if (dataMode === 'mock') {
-        // Stage-A: do not call LLM, return abstain deterministically
-        return response.status(200).json({
-          mode: 'abstain',
-          text: "I don't have the data you're looking for right now.",
-          abstain_reason: 'no_grounding_data',
-          meta: {
-            domain: domainToUse,
-            confidence: routeResult.confidence,
-            groundingType: 'none'
-          },
-          provenance: {
-            source: dataMode,
-            template_id: providedTemplateId || domainToUse,
-            params: params || {}
-          }
-        });
-      } else {
-        // Live mode: allow generic LLM call
-        systemPrompt = `You are Riskill, a financial data analysis assistant. Answer questions about financial KPIs and business metrics. If you don't know the answer, say "I don't have that information available." DO NOT make up data.`;
-        // Lazy-load LLM provider
         let callLLMProvider: any;
         try {
           ({ callLLMProvider } = await import('../src/services/llmProvider.js'));
@@ -376,9 +366,10 @@ BIGQUERY DATA:\n${resultsText}`;
         groundingType
       },
       provenance: {
-        template_id: providedTemplateId || domainToUse,
+        template_id: templateId,
         source: dataMode,
-        params: params || {}
+        params: templateParams,
+        router_debug: route
       }
     });
   } catch (error) {
