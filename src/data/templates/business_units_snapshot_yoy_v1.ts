@@ -115,7 +115,13 @@ export async function runBQ(params: Record<string, any> = {}) {
       template_id: 'business_units_snapshot_yoy_v1',
       unit: chosenUnit,
       year,
-      bq: { ...(resp.diagnostics as any), rows: Array.isArray(resp.rows) ? resp.rows.length : undefined },
+      bq: {
+        jobId: (resp.diagnostics as any)?.jobId,
+        bytesProcessed: (resp.diagnostics as any)?.bytesProcessed,
+        ms: (resp.diagnostics as any)?.executionTime,
+        cacheHit: (resp.diagnostics as any)?.cacheHit,
+        rows: Array.isArray(resp.rows) ? resp.rows.length : undefined,
+      },
     },
   };
 }
