@@ -106,6 +106,13 @@ export default async function handler(request: VercelRequest, response: VercelRe
       widgets = out.widgets ?? null;
     }
 
+    // Optional: pull BigQuery telemetry if available
+    let bqDiag: any = null;
+    try {
+      const bqMod = await import('../src/services/bigQueryClient.js');
+      bqDiag = (bqMod as any)?.lastBigQueryDiagnostics || null;
+    } catch {}
+
     return response.status(200).json({
       mode: 'strict',
       text,
@@ -122,7 +129,8 @@ export default async function handler(request: VercelRequest, response: VercelRe
         template_id: route.template_id,
         domain: route.domain,
         params: route.params,
-        router_debug: route
+        router_debug: route,
+        bq: bqDiag || undefined
       }
     });
   } catch (e: any) {

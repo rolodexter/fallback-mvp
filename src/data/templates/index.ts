@@ -648,7 +648,11 @@ export function getBigQueryTemplateId(domain: string): string {
  * @param store The store data to use for the template
  * @returns Promise resolving to object with kpiSummary and templateOutput
  */
-export async function runTemplate(key: string, store: any, mode?: 'mock' | 'live'): Promise<{ kpiSummary: string | null, templateOutput: string | null }> {
+export async function runTemplate(
+  key: string,
+  store: any,
+  mode?: 'mock' | 'live'
+): Promise<{ kpiSummary: string | null; templateOutput: { text: string; widgets?: any } | null }> {
   try {
     // Apply runtime mode override for Stage-A locking
     MODE_OVERRIDE = mode;
@@ -681,10 +685,11 @@ export async function runTemplate(key: string, store: any, mode?: 'mock' | 'live
     
     // Generate KPI summary if a summary function exists
     const kpiSummary = summaryFn ? await summaryFn(store) : null;
-    
-    // Generate detailed template output
-    const templateOutput = domain ? await generateTemplateOutput(domain, store) : null;
-    
+
+    // Generate detailed template output and normalize to structured object
+    const textOut = domain ? await generateTemplateOutput(domain, store) : null;
+    const templateOutput = textOut ? { text: textOut, widgets: null } : null;
+
     return { kpiSummary, templateOutput };
   } catch (error) {
     console.error(`Error running template for ${key}:`, error);

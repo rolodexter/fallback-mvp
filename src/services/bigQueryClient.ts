@@ -16,6 +16,10 @@ export interface BigQueryResponse {
     template_id?: string;
     params?: Record<string, any>;
     query?: string;
+    ms?: number;
+    jobId?: string;
+    dataset?: string;
+    location?: string;
   };
 }
 
@@ -77,6 +81,8 @@ export async function executeBigQuery(
     
     // Parse the response
     const result = await response.json();
+    // Track last diagnostics for propagation to chat provenance
+    lastBigQueryDiagnostics = result?.diagnostics || null;
     
     // Add debug information if available
     if (typeof window !== 'undefined' && window.__riskillDebug) {
@@ -91,19 +97,26 @@ export async function executeBigQuery(
   } catch (error) {
     console.error('BigQuery client error:', error);
     
+    // Build diagnostics and persist for provenance
+    const diagnostics = {
+      message: 'Failed to execute BigQuery',
+      error: error instanceof Error ? error.message : String(error),
+      template_id: templateId,
+      params,
+    } as BigQueryResponse['diagnostics'];
+    lastBigQueryDiagnostics = diagnostics;
+
     // Return error response
     return {
       success: false,
       rows: [],
-      diagnostics: {
-        message: 'Failed to execute BigQuery',
-        error: error instanceof Error ? error.message : String(error),
-        template_id: templateId,
-        params,
-      },
+      diagnostics,
     };
   }
 }
+
+// Export last diagnostics so server-side chat can include telemetry in provenance
+export let lastBigQueryDiagnostics: BigQueryResponse['diagnostics'] | null = null;
 
 /**
  * Map template domain to BigQuery SQL template ID
