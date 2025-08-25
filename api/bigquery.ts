@@ -21,6 +21,55 @@ import * as path from 'path';
 
 // Lazily initialize BigQuery client only when executing queries (to avoid Stage-A init)
 
+// Helper: decode inline or base64-encoded service account JSON
+type ServiceAccountKey = {
+  client_email?: string;
+  private_key?: string;
+  [k: string]: any;
+};
+
+function getCredentials(): ServiceAccountKey | undefined {
+  const inlineJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+  const alt = process.env.GOOGLE_APPLICATION_CREDENTIALS; // may be raw JSON, base64, or a file path
+
+  const tryParse = (s: string): ServiceAccountKey | undefined => {
+    try {
+      return JSON.parse(s) as ServiceAccountKey;
+    } catch {
+      try {
+        const decoded = Buffer.from(s, 'base64').toString('utf8');
+        return JSON.parse(decoded) as ServiceAccountKey;
+      } catch {
+        return undefined;
+      }
+    }
+  };
+
+  if (inlineJson) {
+    const creds = tryParse(inlineJson);
+    if (creds) return creds;
+  }
+
+  if (alt) {
+    // First, attempt to parse as raw/base64 JSON
+    const parsed = tryParse(alt);
+    if (parsed) return parsed;
+
+    // Otherwise, treat as file path if it exists
+    try {
+      const resolved = path.isAbsolute(alt) ? alt : path.resolve(alt);
+      if (fs.existsSync(resolved)) {
+        const contents = fs.readFileSync(resolved, 'utf8');
+        return JSON.parse(contents) as ServiceAccountKey;
+      }
+    } catch {
+      // ignore and fall through
+    }
+  }
+
+  return undefined;
+}
+
 interface BigQueryRequest {
   template_id: string;
   params?: Record<string, any>;
@@ -76,15 +125,34 @@ const executeBigQuery = async (
   params: Record<string, any> = {}
 ): Promise<BigQueryResponse> => {
   try {
-    const bigquery = new BigQuery();
+    // Build client options from environment
+    const projectId = process.env.GOOGLE_PROJECT_ID || process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
+    const creds = getCredentials();
+    const clientOptions: Record<string, any> = {};
+    if (projectId) clientOptions.projectId = projectId;
+    if (creds?.client_email && creds?.private_key) {
+      clientOptions.credentials = {
+        client_email: creds.client_email,
+        private_key: creds.private_key,
+      };
+    }
+    const bigquery = new BigQuery(clientOptions);
     // Get SQL template
     const sqlTemplate = readSqlTemplate(templateId);
     
     // Prepare SQL with parameters
     const sqlQuery = prepareSql(sqlTemplate, params);
     
-    // Execute query
-    const [rows] = await bigquery.query({ query: sqlQuery });
+    // Execute query with default dataset and location if provided
+    const defaultDataset = process.env.BQ_DEFAULT_DATASET;
+    const location = process.env.BQ_LOCATION;
+    const [rows] = await bigquery.query({
+      query: sqlQuery,
+      location: location || undefined,
+      defaultDataset: defaultDataset
+        ? { datasetId: defaultDataset, projectId: projectId || undefined }
+        : undefined,
+    });
     
     return {
       success: true,

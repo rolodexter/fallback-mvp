@@ -18,6 +18,9 @@
 .env.production.local
 .env
 
+# Env and keys (do not commit secrets)
+*.json
+
 # Logs
 npm-debug.log*
 yarn-debug.log*
