@@ -55,7 +55,8 @@ export async function runBQ(params: Record<string, any> = {}) {
     ? params.year
     : (typeof yearFromMonth === 'number' && !Number.isNaN(yearFromMonth) ? yearFromMonth : (new Date().getFullYear() - 1));
 
-  const resp = await executeBigQuery('business_units_snapshot_yoy_v1', { year });
+  const queryParams = unit ? { year, unit } : { year };
+  const resp = await executeBigQuery('business_units_snapshot_yoy_v1', queryParams);
   if (!resp.success || !resp.rows) {
     const mock = await runMock({ unit, year });
     return {
@@ -115,13 +116,17 @@ export async function runBQ(params: Record<string, any> = {}) {
       template_id: 'business_units_snapshot_yoy_v1',
       unit: chosenUnit,
       year,
-      bq: {
-        jobId: (resp.diagnostics as any)?.jobId,
-        bytesProcessed: (resp.diagnostics as any)?.bytesProcessed,
-        ms: (resp.diagnostics as any)?.executionTime,
-        cacheHit: (resp.diagnostics as any)?.cacheHit,
-        rows: Array.isArray(resp.rows) ? resp.rows.length : undefined,
-      },
+      bq: (() => {
+        const d: any = (resp.diagnostics as any) || {};
+        const bq: any = {};
+        if (d.jobId) bq.jobId = d.jobId;
+        if (typeof d.bytesProcessed !== 'undefined') bq.bytesProcessed = d.bytesProcessed;
+        if (typeof d.executionTime !== 'undefined') bq.ms = d.executionTime;
+        if (typeof d.cacheHit !== 'undefined') bq.cacheHit = d.cacheHit;
+        const count = Array.isArray(resp.rows) ? resp.rows.length : undefined;
+        if (typeof count !== 'undefined') bq.rows = count;
+        return Object.keys(bq).length ? bq : undefined;
+      })(),
     },
   };
 }

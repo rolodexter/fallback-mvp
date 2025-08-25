@@ -26,12 +26,19 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": [
-    "src",
-    "api",
-    "functions",
-    "netlify/functions",
-    "tests",
-    "*.ts"
+    "api/**/*.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "functions/**/*.ts",
+    "netlify/functions/**/*.ts"
+  ],
+  "exclude": [
+    "vite.config.*",
+    "**/*.test.*",
+    "tests/**",
+    "scripts/**",
+    "dist/**",
+    "node_modules/**"
   ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
