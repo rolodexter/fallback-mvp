@@ -94,45 +94,8 @@ export default async function handler(
     // Parse the request body safely
     const body = (request as any).body ?? {};
     const { message, history, grounding, router, template, params } = body as ChatRequest;
-    // Normalize template id from hint
+    // Normalize template id from hint (not validated in Stage-A to avoid registry import)
     const providedTemplateId = getTemplateId(template);
-    // Lazy-load template registry to avoid module-init failures
-    let templateRegistry: any;
-    try {
-      const mod = await import('../src/data/templates/index.js');
-      if (typeof (mod as any).getTemplateRegistry === 'function') {
-        templateRegistry = (mod as any).getTemplateRegistry();
-      } else {
-        throw new Error('getTemplateRegistry not found');
-      }
-    } catch (err) {
-      return response.status(200).json({
-        mode: 'abstain',
-        text: 'Dependency unavailable',
-        provenance: {
-          source: dataMode,
-          tag: 'IMPORT_TEMPLATES_FAIL',
-          error: err instanceof Error ? err.message : String(err)
-        }
-      });
-    }
-    // If client supplied a template id that is not present in registry, short-circuit in Stage-A
-    if (providedTemplateId) {
-      const registryTemplateIds = Object.values(templateRegistry)
-        .map((v: any) => v?.templateId)
-        .filter((x: any): x is string => typeof x === 'string');
-      if (!registryTemplateIds.includes(providedTemplateId)) {
-        return response.status(200).json({
-          mode: 'nodata',
-          text: 'No mock template available for this id.',
-          provenance: {
-            source: dataMode,
-            reason: 'missing_template',
-            template_id: providedTemplateId
-          }
-        });
-      }
-    }
 
     if (!message || typeof message !== 'string') {
       return response.status(200).json({ 
@@ -160,10 +123,12 @@ export default async function handler(
         }
       });
     }
-    const serverRoute = routeMessageFn(message);
-    let routeResult = router && typeof router.domain === 'string'
-      ? { domain: router.domain, confidence: typeof router.confidence === 'number' ? router.confidence : serverRoute.confidence }
-      : serverRoute;
+    const serverRoute = routeMessageFn(message) || {};
+    const serverDomain = serverRoute && serverRoute.domain ? serverRoute.domain : 'none';
+    const serverConfidence = serverDomain !== 'none' ? 0.9 : 0;
+    let routeResult = (router && typeof router.domain === 'string')
+      ? { domain: router.domain, confidence: typeof router.confidence === 'number' ? router.confidence : serverConfidence }
+      : { domain: serverDomain, confidence: serverConfidence };
 
     // For Stage-A we use domain (not template id) to run templates; keep template id only for provenance
     const domainToUse = routeResult.domain !== 'none' ? routeResult.domain : undefined;
@@ -206,7 +171,7 @@ export default async function handler(
             }
           });
         }
-        const templateData = await runTemplateFn(domainToUse, null);
+        const templateData = await runTemplateFn(domainToUse, null, 'mock');
         
         groundingData = {
           domain: domainToUse,
@@ -243,7 +208,7 @@ export default async function handler(
             }
           });
         }
-        const templateData = await runTemplateFn(domainToUse, null);
+        const templateData = await runTemplateFn(domainToUse, null, 'mock');
         
         groundingData = {
           domain: domainToUse,

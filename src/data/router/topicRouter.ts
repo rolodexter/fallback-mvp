@@ -4,7 +4,7 @@
  * Stage-A: Deterministic routes for canonical prompts
  */
 
-import { RouterResult } from './router';
+import type { RouterResult } from './router.js';
 
 export type TopicRouterResult = {
   domain: string;

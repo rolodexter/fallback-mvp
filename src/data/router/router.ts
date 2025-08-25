@@ -3,7 +3,7 @@
  * Uses keyword matching to assign a domain and confidence score
  */
 
-import keywords from './keywords';
+import keywords from './keywords.js';
 
 // Global debug interface is defined in src/services/chatClient.ts
 
