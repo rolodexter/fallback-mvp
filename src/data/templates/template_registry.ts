@@ -4,6 +4,7 @@
 import * as monthlyGrossTrendV1 from './monthly_gross_trend_v1.js';
 import * as topCounterpartiesGrossV1 from './top_counterparties_gross_v1.js';
 import * as businessUnitsSnapshotYoYV1 from './business_units_snapshot_yoy_v1.js';
+import * as businessUnitsListV1 from './business_units_list_v1.js';
 
 const templateRegistry = {
   business_units: {
@@ -51,4 +52,5 @@ export const templateRunners = {
   business_units_snapshot_yoy_v1: businessUnitsSnapshotYoYV1,
   monthly_gross_trend_v1: monthlyGrossTrendV1,
   top_counterparties_gross_v1: topCounterpartiesGrossV1,
+  business_units_list_v1: businessUnitsListV1,
 } as const;

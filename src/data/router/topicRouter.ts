@@ -105,7 +105,7 @@ export function routeMessage(msg: string): RouteHit {
 
   // Synonym: list all business units -> explicit BU list template id
   if (m.includes("list") && (m.includes("business units") || m.includes("bus"))) {
-    return { domain: "profitability", template_id: "business_units_list_v1", params: {} };
+    return { domain: "business_units", template_id: "business_units_list_v1", params: {} };
   }
 
   // Regional performance explicit cues (canonical): "regional", "by region", or known region names

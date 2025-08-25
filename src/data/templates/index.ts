@@ -21,7 +21,7 @@ const TEMPLATE_ID_TO_DOMAIN: Record<string, string> = {
   top_counterparties_gross_v1: 'counterparties',
   // Profitability
   profitability_summary_v1: 'profitability',
-  business_units_list_v1: 'profitability',
+  business_units_list_v1: 'business_units',
   // Regional
   regional_performance_v1: 'regional',
 };
