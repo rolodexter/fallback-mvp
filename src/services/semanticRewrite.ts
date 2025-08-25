@@ -13,7 +13,6 @@ function extractTokens(msg: string) {
 
 // Deterministic fallback when LLM is off/unavailable
 function heuristicRewrite(message: string): RewriteOut | null {
-  const m = message.toLowerCase();
   const { unit, year, month } = extractTokens(message);
 
   const wantsTrend =
@@ -37,8 +36,7 @@ function heuristicRewrite(message: string): RewriteOut | null {
 
 async function callLLM(message: string): Promise<RewriteOut | null> {
   try {
-    const { default: provider, ...named } = await import("./llmProvider.js");
-    const llm: any = provider ?? (named as any);
+    const llm: any = await import("./llmProvider.js");
     const timeoutMs = Number(process.env.LLM_REWRITE_TIMEOUT_MS ?? 1500);
     const system = [
       "You convert executive free-form asks into ONE canonical prompt the router understands.",
