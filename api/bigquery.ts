@@ -225,9 +225,14 @@ export default async function handler(
       params.year = new Date().getFullYear() - 1;
     }
     
-    // Set default limit for counterparties queries if not provided
-    if ((template_id === 'customers_top_n' || template_id === 'top_counterparties_gross_v1') && !params.limit) {
-      params.limit = 5;
+    // Normalize Top-N parameter: accept legacy 'limit' but prefer 'top'
+    if (typeof params.top !== 'number' && typeof params.limit === 'number') {
+      params.top = params.limit;
+      delete params.limit;
+    }
+    // Set default top for counterparties queries if not provided
+    if ((template_id === 'customers_top_n' || template_id === 'top_counterparties_gross_v1') && typeof params.top !== 'number') {
+      params.top = 5;
     }
     
     // Execute BigQuery

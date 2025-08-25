@@ -14,8 +14,6 @@ export interface BigQueryResponse {
     message?: string;
     error?: string;
     template_id?: string;
-    params?: Record<string, any>;
-    query?: string;
     ms?: number;
     jobId?: string;
     dataset?: string;
@@ -100,7 +98,6 @@ export async function executeBigQuery(
       message: 'Failed to execute BigQuery',
       error: error instanceof Error ? error.message : String(error),
       template_id: templateId,
-      params,
     } as BigQueryResponse['diagnostics'];
 
     // Return error response
@@ -112,24 +109,4 @@ export async function executeBigQuery(
   }
 }
 
-/**
- * Map template domain to BigQuery SQL template ID
- * @param domain Domain from router
- * @returns SQL template ID
- */
-export function mapDomainToTemplateId(domain: string): string {
-  switch (domain) {
-    case 'performance':
-      return 'monthly_gross_trend_v1';
-    case 'counterparties':
-      return 'top_counterparties_gross_v1';
-    case 'risk':
-      return 'risks_summary';
-    case 'profitability':
-      return 'profitability_by_business_unit_v1';
-    case 'regional':
-      return 'regional_revenue_trend_24m_v1';
-    default:
-      throw new Error(`Unsupported domain: ${domain}`);
-  }
-}
+// Note: Domain→template mapping intentionally lives in router/registry; this client is a pure query runner.
