@@ -120,9 +120,9 @@ export async function executeBigQuery(
 export function mapDomainToTemplateId(domain: string): string {
   switch (domain) {
     case 'performance':
-      return 'business_units_snapshot_yoy_v1';
+      return 'monthly_gross_trend_v1';
     case 'counterparties':
-      return 'customers_top_n';
+      return 'top_counterparties_gross_v1';
     case 'risk':
       return 'risks_summary';
     case 'profitability':
