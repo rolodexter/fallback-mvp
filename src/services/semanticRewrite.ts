@@ -35,49 +35,105 @@ function heuristicRewrite(message: string): RewriteOut | null {
 }
 
 async function callLLM(message: string): Promise<RewriteOut | null> {
+  // Small helper: tolerant JSON extraction
+  const parseJsonLoose = (txt: string): any | null => {
+    if (!txt) return null;
+    try { return JSON.parse(txt); } catch {}
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (m) { try { return JSON.parse(m[0]); } catch {} }
+    return null;
+  };
+
   try {
-    const llm: any = await import("./llmProvider.js");
+    // Don't assume default export; support named-only modules
+    const mod: any = await import("./llmProvider.js");
+    const llm: any = mod?.default ?? mod;
+
     const timeoutMs = Number(process.env.LLM_REWRITE_TIMEOUT_MS ?? 1500);
+
     const system = [
-      "You convert executive free-form asks into ONE canonical prompt the router understands.",
+      "Convert an executive ask into ONE canonical prompt the router understands.",
       "Allowed canonicals (exact strings):",
       "- Monthly gross trend",
       "- Top counterparties YTD",
       "- List business units",
-      "- <UNIT> <MONTH> snapshot   (e.g., 'Z001 June snapshot')",
-      "- <UNIT> <YEAR>             (e.g., 'Z001 2024')",
-      "If UNIT/MONTH/YEAR appear, KEEP them in the canonical.",
-      "Respond ONLY with strict JSON: {\"canonical\":\"...\",\"confidence\":0..1}"
+      "- <UNIT> <MONTH> snapshot (e.g., 'Z001 June snapshot')",
+      "- <UNIT> <YEAR> (e.g., 'Z001 2024')",
+      "KEEP any UNIT/MONTH/YEAR tokens from the user.",
+      "Respond ONLY as JSON: {\"canonical\":\"...\",\"confidence\":0..1}"
     ].join("\n");
 
     const user = `Message: "${message}"`;
-    // The provider interface can vary; try common shapes
-    const resp =
-      (await llm.chatJSON?.({ system, user, timeoutMs, temperature: 0 })) ||
-      (await llm.chat?.([{ role: "system", content: system }, { role: "user", content: user }], { timeoutMs, temperature: 0 })) ||
-      (await llm.complete?.(system + "\n\n" + user, { timeoutMs, temperature: 0 })) ||
-      // Fallback to the project's callLLMProvider if available
-      (await llm.callLLMProvider?.(user, system, [], null, null));
 
-    const text: string =
-      typeof resp === "string"
-        ? resp
-        : resp?.text ?? resp?.content ?? resp?.choices?.[0]?.message?.content ?? "";
+    // Try providers in order of “most structured” → “least structured”
+    let text: string | undefined;
 
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) return null;
+    // 1) chatJSON(system,user)
+    if (!text && typeof llm?.chatJSON === "function") {
+      const r = await llm.chatJSON({ system, user, temperature: 0, timeoutMs });
+      text = r?.text ?? r?.content ?? r;
+    }
 
-    const parsed = JSON.parse(m[0]);
-    if (typeof parsed?.canonical !== "string") return null;
+    // 2) chat([{role,...}], opts)
+    if (!text && typeof llm?.chat === "function") {
+      const r = await llm.chat(
+        [{ role: "system", content: system }, { role: "user", content: user }],
+        { temperature: 0, timeoutMs }
+      );
+      text = r?.text ?? r?.content ?? r?.choices?.[0]?.message?.content ?? r;
+    }
 
-    // Protect against the model dropping tokens:
+    // 3) complete(prompt)
+    if (!text && typeof llm?.complete === "function") {
+      const r = await llm.complete(system + "\n\n" + user, { temperature: 0, timeoutMs });
+      text = r?.text ?? r?.content ?? r;
+    }
+
+    // 4) callLLMProvider (support object or positional signature)
+    if (!text && typeof llm?.callLLMProvider === "function") {
+      try {
+        // Object signature
+        const rObj = await llm.callLLMProvider({
+          system,
+          prompt: `${system}\n\n${user}\nRespond ONLY with strict JSON.`,
+          temperature: 0,
+          maxTokens: 120,
+          timeoutMs
+        });
+        text = rObj?.text ?? rObj?.content ?? rObj?.output ?? rObj;
+      } catch {}
+
+      if (!text) {
+        try {
+          // Positional signature: (prompt, systemPrompt?, history?, bigQueryData?, domain?)
+          const rPos = await llm.callLLMProvider(user, system, [], null, null);
+          text = rPos?.text ?? rPos?.content ?? rPos;
+        } catch {}
+      }
+    }
+
+    // 5) Other common shims
+    if (!text && typeof llm?.invoke === "function") {
+      const r = await llm.invoke({ system, user, temperature: 0, timeoutMs });
+      text = r?.text ?? r?.content ?? r;
+    }
+    if (!text && typeof llm?.generate === "function") {
+      const r = await llm.generate(system + "\n\n" + user, { temperature: 0, timeoutMs });
+      text = r?.text ?? r?.content ?? r;
+    }
+
+    if (!text) return null;
+
+    const parsed = parseJsonLoose(String(text));
+    if (!parsed || typeof parsed?.canonical !== "string") return null;
+
+    // Ensure tokens weren’t lost
     const { unit, year, month } = extractTokens(message);
-    if (unit && !parsed.canonical.toUpperCase().includes(unit))
-      parsed.canonical = `${unit} ${parsed.canonical}`.trim();
-    if (month && !new RegExp(month, "i").test(parsed.canonical) && !year)
-      parsed.canonical = `${parsed.canonical} ${month}`.trim();
+    let canonical = parsed.canonical.trim();
+    if (unit && !canonical.toUpperCase().includes(unit)) canonical = `${unit} ${canonical}`.trim();
+    if (month && !new RegExp(month, "i").test(canonical) && !year) canonical = `${canonical} ${month}`.trim();
 
-    return { canonical: parsed.canonical.trim(), confidence: Number(parsed.confidence ?? 0) };
+    return { canonical, confidence: Number(parsed.confidence ?? 0) };
   } catch {
     return null;
   }
