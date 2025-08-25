@@ -136,8 +136,8 @@ const ChatPanel: React.FC = () => {
     setMessage(chipText);
   };
 
-  // Narrow Answer shape the UI renderer needs
-  type RenderableAnswer = Pick<Answer, 'text' | 'kpis'>;
+  // Renderer accepts answer fields needed for diagnostics
+  type RenderableAnswer = Pick<Answer, 'text' | 'kpis' | 'mode' | 'provenance' | 'reason' | 'abstain_reason'>;
 
   // Function to render an answer to the chat
   const renderAnswer = (ans: RenderableAnswer) => {
@@ -149,6 +149,26 @@ const ChatPanel: React.FC = () => {
         timestamp: new Date()
       };
       setMessages(prevMessages => [...prevMessages, errorMessage]);
+      return;
+    }
+
+    // If server indicates abstain/nodata, surface diagnostics prominently
+    if (ans.mode && ans.mode !== 'strict') {
+      const prov = ans.provenance || {};
+      const reason = ans.reason || ans.abstain_reason;
+      const parts: string[] = [];
+      if (prov.tag) parts.push(`tag=${prov.tag}`);
+      if (prov.source) parts.push(`source=${prov.source}`);
+      if (reason) parts.push(`reason=${reason}`);
+      if (prov.error) parts.push(`error=${prov.error}`);
+      const diag = parts.length ? `\n(${parts.join(' | ')})` : '';
+      const errorMessage: Message = {
+        id: generateId(),
+        text: `${ans.text}${diag}`,
+        type: 'error',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMessage]);
       return;
     }
 

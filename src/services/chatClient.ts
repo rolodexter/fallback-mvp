@@ -263,7 +263,18 @@ export type Answer = {
   mode: "strict" | "abstain" | "nodata";
   text: string;
   kpis?: { label: string; value: string }[];
-  provenance?: { source?: string; template_id?: string; snapshot?: string };
+  // Include richer provenance and diagnostic fields from the server
+  provenance?: {
+    source?: string;
+    template_id?: string;
+    snapshot?: string;
+    tag?: string; // e.g., IMPORT_*_FAIL, CHAT_RUNTIME
+    error?: string;
+    params?: Record<string, any>;
+  };
+  // Optional reasons for abstain/nodata
+  reason?: string;
+  abstain_reason?: string;
   coverage?: any;
   confidence?: "high" | "medium" | "low";
 };
