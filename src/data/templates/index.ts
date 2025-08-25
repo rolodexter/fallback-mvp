@@ -8,7 +8,9 @@ import templateRegistry from './template_registry.js';
 
 // Stage-A default: mock mode
 const DATA_MODE = (process.env.DATA_MODE ?? 'mock');
-const IS_LIVE = DATA_MODE === 'live';
+// Optional runtime override to force mock/live regardless of environment
+let MODE_OVERRIDE: 'mock' | 'live' | undefined;
+const isEffectiveLive = () => (MODE_OVERRIDE ? MODE_OVERRIDE === 'live' : DATA_MODE === 'live');
 
 type BusinessUnit = {
   business_unit: string;
@@ -48,7 +50,7 @@ type RegionalData = {
 
 export async function performanceSummary(data?: any): Promise<string> { 
   try {
-    if (!IS_LIVE) {
+    if (!isEffectiveLive()) {
       return "Business Units: Navigation +2.7% YoY, Liferafts -1.5% YoY, Overall +0.4% YoY (fallback data).";
     }
     // Use provided data if available, otherwise fetch from BigQuery
@@ -89,7 +91,7 @@ export async function performanceSummary(data?: any): Promise<string> {
 
 export async function counterpartySummary(data?: any): Promise<string> { 
   try {
-    if (!IS_LIVE) {
+    if (!isEffectiveLive()) {
       return "Top counterparties: ACME Corp (€2.1M), Globex Marine (€1.8M), Oceanic Partners (€1.3M) (fallback data).";
     }
     // Use provided data if available, otherwise fetch from BigQuery
@@ -121,7 +123,7 @@ export async function counterpartySummary(data?: any): Promise<string> {
 
 export async function riskSummary(data?: any): Promise<string> { 
   try {
-    if (!IS_LIVE) {
+    if (!isEffectiveLive()) {
       return "Current risk factors: Supply chain delays (high), Market volatility (medium), Regulatory changes (low) (fallback data).";
     }
     // Use provided data if available, otherwise fetch from BigQuery
@@ -162,7 +164,7 @@ export async function riskSummary(data?: any): Promise<string> {
 
 export async function profitabilitySummary(data?: any): Promise<string> { 
   try {
-    if (!IS_LIVE) {
+    if (!isEffectiveLive()) {
       return "Business unit profitability: Navigation (32.5% margin), Safety Equipment (28.1% margin), Overall (30.2% margin) (fallback data).";
     }
     // Use provided data if available, otherwise fetch from BigQuery
@@ -202,7 +204,7 @@ export async function profitabilitySummary(data?: any): Promise<string> {
 
 export async function regionalSummary(data?: any): Promise<string> { 
   try {
-    if (!IS_LIVE) {
+    if (!isEffectiveLive()) {
       return "Regional revenue: AMBA (€2.8M, +4.2%), Patagonia (€1.9M, +2.1%), Buenos Aires (€1.5M, -1.2%) (fallback data).";
     }
     // Use provided data if available, otherwise fetch from BigQuery
@@ -269,7 +271,7 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
   try {
     switch (domain) {
       case 'performance':
-        if (!IS_LIVE) {
+        if (!isEffectiveLive()) {
           return [
             "## Business Unit Performance (YoY)\n",
             "* Navigation: €4.5M (+2.7% YoY)",
@@ -321,7 +323,7 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
         return `## Business Unit Performance (YoY)\n\n${formattedUnits}\n${overallLine}`;
       
       case 'counterparties':
-        if (!IS_LIVE) {
+        if (!isEffectiveLive()) {
           return [
             "## Top 5 Counterparties (Revenue)\n",
             "* ACME Corp: €2.1M (18.1%)",
@@ -361,7 +363,7 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
         return `## Top ${counterparties.length} Counterparties (Revenue)\n\n${formattedCounterparties}`;
       
       case 'risk':
-        if (!IS_LIVE) {
+        if (!isEffectiveLive()) {
           return [
             "## Current Risk Assessment\n",
             "* Supply chain delays: HIGH (Impact: €0.5M)",
@@ -413,7 +415,7 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
 
       case 'regional':
         // Implementation for regional similar to others
-        if (!IS_LIVE) {
+        if (!isEffectiveLive()) {
           return [
             "## Regional Revenue Trend (24 months)\n",
             "* AMBA: €2.8M average monthly revenue (trend: +4.2%)",
@@ -536,10 +538,12 @@ export function getBigQueryTemplateId(domain: string): string {
  * @param store The store data to use for the template
  * @returns Promise resolving to object with kpiSummary and templateOutput
  */
-export async function runTemplate(domain: string, store: any): Promise<{ kpiSummary: string | null, templateOutput: string | null }> {
+export async function runTemplate(domain: string, store: any, mode?: 'mock' | 'live'): Promise<{ kpiSummary: string | null, templateOutput: string | null }> {
   try {
+    // Apply runtime mode override for Stage-A locking
+    MODE_OVERRIDE = mode;
     // Stage-A: if not live and domain not in registry, short-circuit to no data
-    if (!IS_LIVE) {
+    if (!isEffectiveLive()) {
       const reg = getTemplateRegistry();
       if (!reg || !(domain in reg)) {
         return { kpiSummary: null, templateOutput: null };
@@ -558,5 +562,8 @@ export async function runTemplate(domain: string, store: any): Promise<{ kpiSumm
   } catch (error) {
     console.error(`Error running template for ${domain}:`, error);
     return { kpiSummary: null, templateOutput: null };
+  } finally {
+    // Clear override after each run to avoid leaking state
+    MODE_OVERRIDE = undefined;
   }
 }
