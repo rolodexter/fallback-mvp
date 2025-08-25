@@ -5,7 +5,12 @@
     "moduleResolution": "NodeNext",
     "noEmit": true,
     "types": ["node"],
+    "lib": ["ES2022", "DOM"],
     "importsNotUsedAsValues": "remove"
   },
-  "include": ["api", "src/data", "netlify/functions"]
+  "include": ["api", "src/data"],
+  "exclude": [
+    "netlify/**",
+    "src/data/templates/registry.ts"
+  ]
 }

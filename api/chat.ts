@@ -93,9 +93,7 @@ export default async function handler(
   try {
     // Parse the request body safely
     const body = (request as any).body ?? {};
-    const { message, history, grounding, router, template, params } = body as ChatRequest;
-    // Normalize template id from hint (not validated in Stage-A to avoid registry import)
-    const providedTemplateId = getTemplateId(template);
+    const { message, history, grounding } = body as ChatRequest;
 
     if (!message || typeof message !== 'string') {
       return response.status(200).json({ 

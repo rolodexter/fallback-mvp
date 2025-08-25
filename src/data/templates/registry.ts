@@ -3,8 +3,8 @@
  * Stage-A: Exports template IDs exactly matching those in template_registry.ts
  */
 
-import templateConfig from "./template_registry";
-import { runTemplate } from "./index";
+import templateConfig from "./template_registry.js";
+import { runTemplate } from "./index.js";
 
 // Type for template run functions
 export type TemplateRun = (params?: Record<string, any>) => Promise<any>;
