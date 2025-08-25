@@ -103,27 +103,16 @@ const readSqlTemplate = (templateId: string): string => {
   }
 };
 
-// Replace parameters in SQL
-const prepareSql = (sqlTemplate: string, params: Record<string, any> = {}): string => {
-  let preparedSql = sqlTemplate;
-  
-  // Replace all @param placeholders with values or defaults
-  for (const [key, value] of Object.entries(params)) {
-    const paramPlaceholder = `@${key}`;
-    preparedSql = preparedSql.replace(
-      new RegExp(paramPlaceholder, 'g'),
-      typeof value === 'string' ? `'${value}'` : value
-    );
-  }
-  
-  return preparedSql;
-};
+// Deprecated: parameter substitution is now handled by BigQuery named params
+// (kept for reference, not used)
+const prepareSql = (sqlTemplate: string): string => sqlTemplate;
 
 // Execute BigQuery
 const executeBigQuery = async (
   templateId: string,
   params: Record<string, any> = {}
 ): Promise<BigQueryResponse> => {
+  const t0 = Date.now();
   try {
     // Build client options from environment
     const projectId = process.env.GOOGLE_PROJECT_ID || process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
@@ -140,19 +129,21 @@ const executeBigQuery = async (
     // Get SQL template
     const sqlTemplate = readSqlTemplate(templateId);
     
-    // Prepare SQL with parameters
-    const sqlQuery = prepareSql(sqlTemplate, params);
-    
     // Execute query with default dataset and location if provided
     const defaultDataset = process.env.BQ_DEFAULT_DATASET;
     const location = process.env.BQ_LOCATION;
-    const [rows] = await bigquery.query({
-      query: sqlQuery,
+    const [rows, job, apiResponse] = await bigquery.query({
+      query: sqlTemplate,
+      params: params,
       location: location || undefined,
       defaultDataset: defaultDataset
         ? { datasetId: defaultDataset, projectId: projectId || undefined }
         : undefined,
-    });
+      useLegacySql: false,
+    } as any);
+    
+    const ms = Date.now() - t0;
+    const jobId = (job as any)?.id || (apiResponse as any)?.jobReference?.jobId || undefined;
     
     return {
       success: true,
@@ -160,11 +151,16 @@ const executeBigQuery = async (
       diagnostics: {
         template_id: templateId,
         params,
-        query: sqlQuery
+        query: sqlTemplate,
+        ms,
+        jobId,
+        dataset: defaultDataset,
+        location: location || undefined,
       }
     };
   } catch (error: unknown) {
     console.error(`BigQuery execution error:`, error);
+    const ms = Date.now() - t0;
     return {
       success: false,
       rows: [],
@@ -172,7 +168,8 @@ const executeBigQuery = async (
         message: 'Failed to execute BigQuery',
         error: error instanceof Error ? error.message : String(error),
         template_id: templateId,
-        params
+        params,
+        ms,
       }
     };
   }

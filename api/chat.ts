@@ -1,395 +1,135 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
- 
- // Vercel Node runtime configuration
- export const config = { runtime: "nodejs" };
 
-// Supported data modes
+// Vercel Node runtime configuration
+export const config = { runtime: 'nodejs' };
+
 type DataMode = 'mock' | 'live';
 
-// No dotenv in serverless functions; rely on platform env
-
-// (removed unused helper)
-
-type ChatRequest = {
-  message: string;
-  history?: Array<{ role: 'user' | 'assistant'; content: string }>;
-  grounding?: {
-    domain: string | null;
-    confidence: number;
-    groundingType: 'intro' | 'drilldown' | 'no_data' | null;
-    kpiSummary?: string | null;
-    templateOutput?: string | null;
-    bigQueryData?: any[] | null;
-  };
-  router?: {
-    domain: string;
-    confidence?: number;
-    [key: string]: any;
-  };
-  template?: string | { id?: string };
-  params?: Record<string, any>;
-};
-
-export default async function handler(
-  request: VercelRequest,
-  response: VercelResponse
-) {
-  // Set CORS headers
+export default async function handler(request: VercelRequest, response: VercelResponse) {
+  // CORS
   response.setHeader('Access-Control-Allow-Credentials', 'true');
   response.setHeader('Access-Control-Allow-Origin', '*');
-  response.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   response.setHeader(
     'Access-Control-Allow-Headers',
     'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization'
   );
 
-  // Handle preflight OPTIONS requests
   if (request.method === 'OPTIONS') {
     return response.status(200).end();
   }
-  
-  // Ensure it's a POST request
-  if (request.method !== 'POST') {
-    return response.status(405).json({ error: 'Method Not Allowed' });
-  }
-  
-  // Check which data mode we're in (mock or live); treat 'bq' as live for preview safety
-  const RAW_DATA_MODE = process.env.DATA_MODE ?? 'mock';
-  const dataMode: DataMode = (RAW_DATA_MODE === 'live' || RAW_DATA_MODE === 'bq') ? 'live' : 'mock';
-  console.log(`[Vercel] Using data mode: ${dataMode}`);
-  
-  // Only require LLM-related env vars when narrative polishing is explicitly enabled
-  const requireLLM = (process.env.POLISH_NARRATIVE === 'true');
-  if (requireLLM) {
-    const requiredEnvVars = ['PROVIDER', 'PERPLEXITY_API_KEY'];
-    if (requireLLM) {
-      requiredEnvVars.push('GOOGLE_APPLICATION_CREDENTIALS');
-    }
-    const missingVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
-    if (missingVars.length > 0) {
-      console.error(`[ERROR] Missing required environment variables: ${missingVars.join(', ')}`);
-      return response.status(503).json({ 
-        mode: 'nodata',
-        reason: 'missing_env',
-        text: 'Service unavailable due to missing environment configuration.',
-        details: `Missing environment variables: ${missingVars.join(', ')}` 
-      });
-    }
-    // Validate provider value when used
-    const provider = process.env.PROVIDER;
-    if (provider !== 'perplexity') {
-      console.error(`[ERROR] Unsupported provider: ${provider}`);
-      return response.status(503).json({ 
-        mode: 'nodata',
-        reason: 'invalid_provider',
-        text: 'Service unavailable due to provider configuration issues.',
-        details: `Unsupported provider: ${provider}`
-      });
-    }
-  }
-  
+
+  // 1) Safe body parse + GET fallback
+  let body: any = {};
   try {
-    // Parse the request body safely
-    const body = (request as any).body ?? {};
-    const { message, history, grounding } = body as ChatRequest;
+    const raw = (request as any).body;
+    body = typeof raw === 'string' && raw ? JSON.parse(raw) : (raw ?? {});
+  } catch {
+    body = {};
+  }
+  const userMessage = String((body?.message ?? (request.query as any)?.message ?? ''));
 
-    if (!message || typeof message !== 'string') {
-      return response.status(200).json({ 
-        mode: 'nodata', 
-        reason: 'missing_message',
-        text: 'No message provided.'
-      });
-    }
-    
-    // Determine routing; if client router lacks confidence, compute on server
-    // Lazy-load topic router to avoid module-init failures
-    let routeMessageFn: any;
-    try {
-      const mod = await import('../src/data/router/topicRouter.js');
-      routeMessageFn = mod.routeMessage;
-      if (typeof routeMessageFn !== 'function') throw new Error('routeMessage not found');
-    } catch (err) {
-      return response.status(200).json({
-        mode: 'abstain',
-        text: 'Dependency unavailable',
-        provenance: {
-          source: dataMode,
-          tag: 'IMPORT_ROUTER_FAIL',
-          error: err instanceof Error ? err.message : String(err)
-        }
-      });
-    }
-    const route = routeMessageFn(message) || {};
-    const serverDomain = route && route.domain ? route.domain : 'none';
-    const serverConfidence = typeof route.confidence === 'number' ? route.confidence : (serverDomain !== 'none' ? 0.9 : 0);
-    const routeResult = { domain: serverDomain, confidence: serverConfidence };
+  // 2) Normalize data mode ('bq' -> 'live')
+  const RAW_MODE = String(process.env.DATA_MODE ?? 'mock').toLowerCase();
+  const DATA_MODE: DataMode = RAW_MODE === 'bq' ? 'live' : (RAW_MODE === 'live' ? 'live' : 'mock');
 
-    // Pull deterministic template id and params from router
-    const templateId = route?.template_id as string | undefined;
-    const templateParams = (route && typeof route.params === 'object') ? route.params as Record<string, any> : {};
-
-    // If router failed to produce a domain, return nodata with guidance
-    if (serverDomain === 'none' || serverConfidence < 0.3) {
-      console.info('[Vercel] No domain detected or low confidence, returning nodata response');
-      return response.status(200).json({
-        mode: 'nodata',
-        reason: 'no_domain',
-        text: 'Try asking about Business Units (YoY), Top Counterparties, or Monthly Gross Trend.',
-        meta: {
-          domain: null,
-          confidence: routeResult.confidence || 0,
-          groundingType: null
-        }
-      });
-    }
-
-    // If no deterministic template id, abstain deterministically (Stage-A)
-    if (!templateId) {
-      return response.status(200).json({
-        mode: 'abstain',
-        text: 'No deterministic grounding available (Stage-A mock).',
-        provenance: { source: dataMode, tag: 'NO_GROUNDING', reason: 'router_or_template_missing', router_debug: route },
-        meta: { domain: serverDomain, confidence: routeResult.confidence, groundingType: 'none' }
-      });
-    }
-    
-    // Generate grounding data if not provided in request
-    let groundingData = grounding;
-    
-    if (!groundingData && templateId && routeResult.confidence >= 0.3) {
-      try {
-        console.info(`[Vercel] Generating grounding data for template: ${templateId}`);
-        // Lazy-load templates module
-        let runTemplateFn: any;
-        try {
-          const mod = await import('../src/data/templates/index.js');
-          runTemplateFn = mod.runTemplate;
-          if (typeof runTemplateFn !== 'function') throw new Error('runTemplate not found');
-        } catch (err) {
-          return response.status(200).json({
-            mode: 'abstain',
-            text: 'Dependency unavailable',
-            provenance: {
-              source: dataMode,
-              tag: 'IMPORT_TEMPLATES_FAIL',
-              error: err instanceof Error ? err.message : String(err)
-            }
-          });
-        }
-        const templateData = await runTemplateFn(templateId, templateParams, dataMode);
-        
-        groundingData = {
-          domain: serverDomain,
-          confidence: routeResult.confidence,
-          kpiSummary: templateData.kpiSummary || null,
-          templateOutput: templateData.templateOutput || null,
-          groundingType: 'drilldown',  // Using supported type from the enum
-          bigQueryData: null
-        };
-      } catch (err) {
-        console.error(`[ERROR] Failed to generate grounding data:`, err);
-        // Continue without grounding if generation fails
-      }
-    }
-    
-    // If we're in live mode and don't have BigQuery data yet, try template
-    if (dataMode === 'live' && !groundingData && templateId && routeResult.confidence >= 0.3) {
-      try {
-        console.info(`[Vercel] Generating grounding data for template: ${templateId}`);
-        // Lazy-load templates module
-        let runTemplateFn: any;
-        try {
-          const mod = await import('../src/data/templates/index.js');
-          runTemplateFn = mod.runTemplate;
-          if (typeof runTemplateFn !== 'function') throw new Error('runTemplate not found');
-        } catch (err) {
-          return response.status(200).json({
-            mode: 'abstain',
-            text: 'Dependency unavailable',
-            provenance: {
-              source: dataMode,
-              tag: 'IMPORT_TEMPLATES_FAIL',
-              error: err instanceof Error ? err.message : String(err)
-            }
-          });
-        }
-        const templateData = await runTemplateFn(templateId, templateParams, 'live');
-        
-        groundingData = {
-          domain: serverDomain,
-          confidence: routeResult.confidence,
-          kpiSummary: templateData.kpiSummary || null,
-          templateOutput: templateData.templateOutput || null,
-          groundingType: 'drilldown',
-          bigQueryData: null
-        };
-      } catch (err) {
-        console.error(`[ERROR] Failed to generate grounding data:`, err);
-        // Continue without grounding if generation fails
-      }
-    }
-    
-    // If we still don't have grounding data, return abstain response
-    if (!groundingData) {
-      return response.status(200).json({
-        mode: 'abstain',
-        text: 'I don\'t have the data you\'re looking for right now.',
-        abstain_reason: 'no_grounding_data',
-        meta: {
-          domain: serverDomain,
-          confidence: routeResult.confidence,
-          groundingType: 'none'
-        },
-        provenance: {
-          source: dataMode,
-          template_id: templateId,
-          params: templateParams,
-          router_debug: route
-        }
-      });
-    }
-    
-    // Extract domain and BigQuery data from grounding
-    const domain = groundingData.domain;
-    const bigQueryData = groundingData.bigQueryData || null;
-    const templateOutput = groundingData.templateOutput || null;
-    const kpiSummary = groundingData.kpiSummary || null;
-    const groundingType = groundingData.groundingType;
-    
-    console.log(`Using domain: ${domain}, Grounding type: ${groundingType}`);
-    
-    let systemPrompt = '';
-    let responseText = '';
-    let widgets = null;
-    
-    // For template/mock data mode, we can use the template output directly
-    if (templateOutput) {
-      // If polishing is disabled, always use template output directly
-      if (process.env.POLISH_NARRATIVE !== 'true') {
-        responseText = templateOutput;
-      } else {
-        // In polish mode, use the template output to guide the LLM
-        systemPrompt = `You are Riskill, a financial data analysis assistant. Answer the question using ONLY the data and text provided below. If you cannot answer the question with the provided data, say "I don't have that information available." DO NOT make up any data or statistics that are not provided.
-
-KPI SUMMARY:\n${kpiSummary || 'No KPI summary available.'}
-
-TEMPLATE OUTPUT:\n${templateOutput}`;
-        
-        // Lazy-load LLM provider
-        let callLLMProvider: any;
-        try {
-          ({ callLLMProvider } = await import('../src/services/llmProvider.js'));
-        } catch (err) {
-          return response.status(200).json({
-            mode: 'abstain',
-            text: 'Dependency unavailable',
-            provenance: {
-              source: dataMode,
-              tag: 'IMPORT_LLM_FAIL',
-              error: err instanceof Error ? err.message : String(err)
-            }
-          });
-        }
-        // Call LLM provider
-        responseText = await callLLMProvider(message, systemPrompt, history, null, domain);
-      }
-    } else if (bigQueryData) {
-      // Format BigQuery results
-      const resultsText = JSON.stringify(bigQueryData, null, 2);
-      systemPrompt = `You are Riskill, a financial data analysis assistant. Answer the question using ONLY the data provided below. If you cannot answer the question with the provided data, say "I don't have that information available." DO NOT make up any data or statistics that are not provided.
-
-BIGQUERY DATA:\n${resultsText}`;
-      
-      // Lazy-load LLM provider
-      let callLLMProvider: any;
-      try {
-        ({ callLLMProvider } = await import('../src/services/llmProvider.js'));
-      } catch (err) {
-        return response.status(200).json({
-          mode: 'abstain',
-          text: 'Dependency unavailable',
-          provenance: {
-            source: dataMode,
-            tag: 'IMPORT_LLM_FAIL',
-            error: err instanceof Error ? err.message : String(err)
-          }
-        });
-      }
-      // Call LLM provider
-      responseText = await callLLMProvider(message, systemPrompt, [], bigQueryData, domain);
-    } else {
-      // No grounding available
-      if (dataMode === 'mock') {
-        let callLLMProvider: any;
-        try {
-          ({ callLLMProvider } = await import('../src/services/llmProvider.js'));
-        } catch (err) {
-          return response.status(200).json({
-            mode: 'abstain',
-            text: 'Dependency unavailable',
-            provenance: {
-              source: dataMode,
-              tag: 'IMPORT_LLM_FAIL',
-              error: err instanceof Error ? err.message : String(err)
-            }
-          });
-        }
-        responseText = await callLLMProvider(message, systemPrompt, [], null, null);
-      }
-    }
-
-    // Extract widgets from template data if available
-    if (groundingData && groundingData.kpiSummary) {
-      try {
-        const kpiData = JSON.parse(groundingData.kpiSummary);
-        if (kpiData && typeof kpiData === 'object') {
-          widgets = kpiData;
-        }
-      } catch (e) {
-        console.warn('Failed to parse KPI data as JSON:', e);
-      }
-    }
-
-    // Prepare response
+  // If no message, return a friendly diagnostic instead of 405/400
+  if (!userMessage) {
     return response.status(200).json({
-      text: responseText,
-      mode: 'strict',  // Default to strict mode for mock/template data
-      widgets: widgets,
+      mode: 'nodata',
+      reason: 'missing_message',
+      text: 'No message provided.',
+      provenance: { source: 'mock', tag: 'NO_MESSAGE' }
+    });
+  }
+
+  // 3) Lazy import the router with guard
+  let routeMessage: undefined | ((x: string) => any);
+  try {
+    const mod = await import('../src/data/router/topicRouter.js');
+    routeMessage = mod?.routeMessage;
+    if (typeof routeMessage !== 'function') throw new Error('routeMessage not found');
+  } catch (e: any) {
+    return response.status(200).json({
+      mode: 'abstain',
+      text: 'Router import failed.',
+      provenance: { source: 'mock', tag: 'IMPORT_ROUTER_FAIL', error: e?.message ?? String(e) }
+    });
+  }
+
+  // 4) Route the message
+  let route: any;
+  try {
+    route = await routeMessage(userMessage);
+  } catch (e: any) {
+    return response.status(200).json({
+      mode: 'abstain',
+      text: 'Router error.',
+      provenance: { source: 'mock', tag: 'ROUTER_RUNTIME', error: e?.message ?? String(e) }
+    });
+  }
+
+  if (!route?.template_id) {
+    return response.status(200).json({
+      mode: 'abstain',
+      text: 'No deterministic grounding available (Stage-A).',
+      provenance: { source: 'mock', tag: 'NO_GROUNDING', router_debug: route }
+    });
+  }
+
+  // 5) Lazy import templates with guard
+  let runTemplate: undefined | ((id: string, p: any, m: DataMode) => Promise<any>);
+  try {
+    const mod = await import('../src/data/templates/index.js');
+    runTemplate = mod?.runTemplate;
+    if (typeof runTemplate !== 'function') throw new Error('runTemplate not found');
+  } catch (e: any) {
+    return response.status(200).json({
+      mode: 'abstain',
+      text: 'Template runtime import failed.',
+      provenance: { source: 'mock', tag: 'IMPORT_TEMPLATES_FAIL', error: e?.message ?? String(e) }
+    });
+  }
+
+  // 6) Execute template with full guard
+  try {
+    const tpl = await runTemplate(route.template_id, route.params ?? {}, DATA_MODE);
+
+    // Normalize output: support string or {text, widgets}
+    let text: string = 'No text.';
+    let widgets: any = null;
+    const out = tpl?.templateOutput;
+    if (typeof out === 'string') {
+      text = out;
+    } else if (out && typeof out === 'object') {
+      text = out.text ?? 'No text.';
+      widgets = out.widgets ?? null;
+    }
+
+    return response.status(200).json({
+      mode: 'strict',
+      text,
+      kpis: tpl?.kpiSummary ?? null,
+      widgets,
       meta: {
-        domain,
-        confidence: routeResult.confidence,
-        groundingType
+        domain: route?.domain ?? null,
+        confidence: typeof route?.confidence === 'number' ? route.confidence : 1,
+        groundingType: 'drilldown'
       },
       provenance: {
-        template_id: templateId,
-        source: dataMode,
-        params: templateParams,
+        source: RAW_MODE === 'bq' ? 'bq' : (RAW_MODE === 'live' ? 'live' : 'mock'),
+        tag: 'TEMPLATE_RUN',
+        template_id: route.template_id,
+        domain: route.domain,
+        params: route.params,
         router_debug: route
       }
     });
-  } catch (error) {
-    console.error('Error processing request:', error);
-    if (error instanceof Error) {
-      console.error(error.message);
-      if (process.env.NODE_ENV === 'development') {
-        console.error(`Development error: ${error.message}`);
-      }
-    }
-    // Telemetry: log stack for rapid diagnosis
-    if (error && typeof (error as any).stack === 'string') {
-      console.error('[CHAT_RUNTIME]', (error as any).stack);
-    } else {
-      console.error('[CHAT_RUNTIME] no-stack');
-    }
-    // Fail-safe: never 500 in Stage-A; return deterministic abstain
+  } catch (e: any) {
     return response.status(200).json({
       mode: 'abstain',
-      text: 'Runtime guard activated. See Functions logs for details.',
-      provenance: {
-        source: (typeof dataMode !== 'undefined' ? dataMode : 'mock'),
-        tag: 'CHAT_RUNTIME',
-        error: error instanceof Error ? error.message : String(error)
-      }
+      text: 'Runtime guard (mock).',
+      provenance: { source: 'mock', tag: 'CHAT_RUNTIME', error: e?.message ?? String(e) }
     });
   }
 }
