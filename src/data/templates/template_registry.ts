@@ -1,6 +1,9 @@
 // Generated from template_registry.json to avoid JSON import issues in serverless bundling
 // Exported as a TypeScript module for safer Vercel runtime
 
+import * as monthlyGrossTrendV1 from './monthly_gross_trend_v1.js';
+import * as topCounterpartiesGrossV1 from './top_counterparties_gross_v1.js';
+
 const templateRegistry = {
   business_units: {
     schemaId: "bu_v1",
@@ -40,3 +43,10 @@ const templateRegistry = {
 } as const;
 
 export default templateRegistry;
+
+// Map concrete template IDs to runnable module functions (runMock/runBQ)
+// Note: Consumers can choose which to call based on DATA_MODE/live
+export const templateRunners = {
+  monthly_gross_trend_v1: monthlyGrossTrendV1,
+  top_counterparties_gross_v1: topCounterpartiesGrossV1,
+} as const;
