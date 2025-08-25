@@ -12,6 +12,7 @@ type Message = {
   text: string;
   type: MessageType;
   timestamp: Date;
+  widget?: any;
 };
 
 // Simple 5-card rail based on current domain, with skeletons to avoid layout shift
@@ -67,6 +68,42 @@ const WidgetRail: React.FC<{ domain?: string; loading?: boolean }> = ({ domain, 
         </div>
       ))}
     </div>
+  );
+};
+
+// Exec-friendly widget renderer and numeric formatting
+const nf = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
+
+const WidgetRenderer: React.FC<{ widget: any }> = ({ widget }) => {
+  if (!widget) return null;
+  if (widget.type === 'table' && Array.isArray(widget.columns) && Array.isArray(widget.rows)) {
+    return (
+      <div className="overflow-x-auto">
+        <table className="min-w-full table-auto text-sm">
+          <thead>
+            <tr>
+              {widget.columns.map((c: string) => (
+                <th key={c} className="px-3 py-2 text-left">{c}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {widget.rows.map((r: any[], i: number) => (
+              <tr key={i}>
+                {r.map((cell, j) => (
+                  <td key={j} className="px-3 py-2 border-t">
+                    {typeof cell === 'number' ? nf.format(cell) : String(cell ?? '')}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  return (
+    <pre className="text-xs whitespace-pre-wrap">{JSON.stringify(widget, null, 2)}</pre>
   );
 };
 
@@ -183,7 +220,12 @@ const ChatPanel: React.FC = () => {
     
     // Include KPIs if provided
     if (Array.isArray(ans.kpis) && ans.kpis.length) {
-      const kpiText = ans.kpis.map(k => `• ${k.label}: ${k.value}`).join('\n');
+      const kpiText = ans.kpis
+        .map(k => {
+          const val = typeof k.value === 'number' ? nf.format(k.value) : String(k.value);
+          return `• ${k.label}: ${val}`;
+        })
+        .join('\n');
       const kpiMessage: Message = {
         id: generateId(),
         text: kpiText,
@@ -195,12 +237,12 @@ const ChatPanel: React.FC = () => {
 
     // Include widgets (rendered as compact JSON) if provided
     if (ans.widgets) {
-      const widgetsText = 'Widgets\n' + '```json\n' + JSON.stringify(ans.widgets, null, 2) + '\n```';
       const widgetsMessage: Message = {
         id: generateId(),
-        text: widgetsText,
+        text: '',
         type: 'bot',
-        timestamp: new Date()
+        timestamp: new Date(),
+        widget: ans.widgets,
       };
       setMessages(prev => [...prev, widgetsMessage]);
     }
@@ -360,7 +402,9 @@ const ChatPanel: React.FC = () => {
         ) : (
           messages.map((msg) => (
             <div key={msg.id} className={`chat-message ${msg.type}-message`}>
-              <div className="message-content">{msg.text}</div>
+              <div className="message-content">
+                {msg.widget ? <WidgetRenderer widget={msg.widget} /> : msg.text}
+              </div>
               {msg.type === 'bot' && msg.text.includes("Stage-A") && (
                 <div className="example-chips">
                   {exampleChips.map((chip, index) => (
