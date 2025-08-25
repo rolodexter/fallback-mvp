@@ -81,8 +81,6 @@ export async function executeBigQuery(
     
     // Parse the response
     const result = await response.json();
-    // Track last diagnostics for propagation to chat provenance
-    lastBigQueryDiagnostics = result?.diagnostics || null;
     
     // Add debug information if available
     if (typeof window !== 'undefined' && window.__riskillDebug) {
@@ -104,7 +102,6 @@ export async function executeBigQuery(
       template_id: templateId,
       params,
     } as BigQueryResponse['diagnostics'];
-    lastBigQueryDiagnostics = diagnostics;
 
     // Return error response
     return {
@@ -114,9 +111,6 @@ export async function executeBigQuery(
     };
   }
 }
-
-// Export last diagnostics so server-side chat can include telemetry in provenance
-export let lastBigQueryDiagnostics: BigQueryResponse['diagnostics'] | null = null;
 
 /**
  * Map template domain to BigQuery SQL template ID

@@ -106,12 +106,8 @@ export default async function handler(request: VercelRequest, response: VercelRe
       widgets = out.widgets ?? null;
     }
 
-    // Optional: pull BigQuery telemetry if available
-    let bqDiag: any = null;
-    try {
-      const bqMod = await import('../src/services/bigQueryClient.js');
-      bqDiag = (bqMod as any)?.lastBigQueryDiagnostics || null;
-    } catch {}
+    // Pull BigQuery telemetry from per-call template provenance when available
+    const bqDiag: any = tpl?.provenance?.bq || null;
 
     return response.status(200).json({
       mode: 'strict',

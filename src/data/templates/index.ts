@@ -281,7 +281,10 @@ export async function regionalSummary(data?: any): Promise<string> {
  * @param data Optional data from BigQuery
  * @returns Detailed template output as string or Promise<string>
  */
-export async function generateTemplateOutput(domain: string, data?: any): Promise<string> {
+type BQDiag = { ms?: number; jobId?: string; dataset?: string; location?: string; query?: string; params?: Record<string, any> };
+type TemplateDetail = { text: string; widgets?: any; provenance?: { source?: string; tag?: string; bq?: BQDiag; unit?: string; monthIso?: string; template_id?: string } };
+
+export async function generateTemplateOutput(domain: string, data?: any): Promise<string | TemplateDetail> {
   try {
     switch (domain) {
       case 'business_units':
@@ -329,15 +332,10 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
           const monthIso = data && data.month ? String(data.month) : undefined;
           const yearParam: number | undefined = data && data.year ? Number(data.year) : undefined;
 
-          // Build month label for header (non-fatal if parsing fails)
-          let monthLabel = '';
-          try {
-            const d = monthIso ? new Date(monthIso) : new Date();
-            monthLabel = d.toLocaleString('en-US', { month: 'short', year: 'numeric' });
-          } catch {
-            const now = new Date();
-            monthLabel = now.toLocaleString('en-US', { month: 'short', year: 'numeric' });
-          }
+          // Align header to year-based snapshot to match SQL semantics
+          const headerYear = typeof yearParam === 'number' && !Number.isNaN(yearParam)
+            ? yearParam
+            : (new Date().getFullYear() - 1);
 
           // Always request at least year for the snapshot (default: latest complete year per API)
           const params: Record<string, any> = {};
@@ -369,13 +367,26 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
           const prvMEUR = prev / 1_000_000;
           const yoyMEUR = curMEUR - prvMEUR;
 
-          return [
-            `## ${u} — ${monthLabel} snapshot (YoY)`,
+          const text = [
+            `## ${u} — ${headerYear} snapshot (YoY)`,
             '',
-            `* Revenue (year-to-date or period): €${curMEUR.toFixed(2)}M (prev: €${prvMEUR.toFixed(2)}M)`,
+            `* Revenue (year): €${curMEUR.toFixed(2)}M (prev: €${prvMEUR.toFixed(2)}M)`,
             `* YoY Δ: €${yoyMEUR.toFixed(2)}M (${yoyPct >= 0 ? '+' : ''}${yoyPct.toFixed(1)}%)`,
             `* Source: BigQuery template business_units_snapshot_yoy_v1`
           ].join('\n');
+
+          return {
+            text,
+            widgets: null,
+            provenance: {
+              source: 'bq',
+              tag: 'TEMPLATE_RUN',
+              bq: resp.diagnostics as BQDiag,
+              unit,
+              monthIso,
+              template_id: 'business_units_snapshot_yoy_v1'
+            }
+          };
         } catch (e) {
           console.error('Live BU snapshot generation failed:', e);
           return "Business units detail not available.";
@@ -461,6 +472,17 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
             ].join('\n');
           }
           counterparties = response.rows;
+          // Include telemetry in provenance
+          const formattedCounterparties = counterparties.map((cp: Counterparty) => {
+            const revenueMil = (cp.revenue_amount / 1000000).toFixed(1);
+            const percent = cp.revenue_percent.toFixed(1);
+            return `* ${cp.counterparty_name}: €${revenueMil}M (${percent}%)`;
+          }).join('\n');
+          return {
+            text: `## Top ${counterparties.length} Counterparties (Revenue)\n\n${formattedCounterparties}`,
+            widgets: null,
+            provenance: { source: 'bq', tag: 'TEMPLATE_RUN', bq: response.diagnostics as BQDiag, template_id: 'customers_top_n' }
+          };
         }
         
         // Format output
@@ -652,7 +674,7 @@ export async function runTemplate(
   key: string,
   store: any,
   mode?: 'mock' | 'live'
-): Promise<{ kpiSummary: string | null; templateOutput: { text: string; widgets?: any } | null }> {
+): Promise<{ kpiSummary: string | null; templateOutput: { text: string; widgets?: any } | null; provenance?: any }> {
   try {
     // Apply runtime mode override for Stage-A locking
     MODE_OVERRIDE = mode;
@@ -687,10 +709,19 @@ export async function runTemplate(
     const kpiSummary = summaryFn ? await summaryFn(store) : null;
 
     // Generate detailed template output and normalize to structured object
-    const textOut = domain ? await generateTemplateOutput(domain, store) : null;
-    const templateOutput = textOut ? { text: textOut, widgets: null } : null;
+    const out = domain ? await generateTemplateOutput(domain, store) : null;
+    let templateOutput: { text: string; widgets?: any } | null = null;
+    let provenance: any = undefined;
+    if (out) {
+      if (typeof out === 'string') {
+        templateOutput = { text: out, widgets: null };
+      } else if (typeof out === 'object') {
+        templateOutput = { text: out.text, widgets: out.widgets ?? null };
+        provenance = out.provenance;
+      }
+    }
 
-    return { kpiSummary, templateOutput };
+    return { kpiSummary, templateOutput, provenance };
   } catch (error) {
     console.error(`Error running template for ${key}:`, error);
     return { kpiSummary: null, templateOutput: null };
