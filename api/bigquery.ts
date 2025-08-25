@@ -154,8 +154,6 @@ const executeBigQuery = async (
       rows,
       diagnostics: {
         template_id: templateId,
-        params,
-        query: sqlTemplate,
         ms,
         jobId,
         dataset: defaultDataset,
@@ -172,7 +170,6 @@ const executeBigQuery = async (
         message: 'Failed to execute BigQuery',
         error: error instanceof Error ? error.message : String(error),
         template_id: templateId,
-        params,
         ms,
       }
     };
