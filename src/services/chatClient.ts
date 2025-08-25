@@ -263,6 +263,8 @@ export type Answer = {
   mode: "strict" | "abstain" | "nodata";
   text: string;
   kpis?: { label: string; value: string }[];
+  widgets?: any; // server may return widgets or null
+  meta?: { domain: string | null; confidence: number; groundingType: string | null };
   // Include richer provenance and diagnostic fields from the server
   provenance?: {
     source?: string;

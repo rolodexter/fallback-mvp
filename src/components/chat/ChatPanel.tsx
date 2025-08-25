@@ -137,7 +137,7 @@ const ChatPanel: React.FC = () => {
   };
 
   // Renderer accepts answer fields needed for diagnostics
-  type RenderableAnswer = Pick<Answer, 'text' | 'kpis' | 'mode' | 'provenance' | 'reason' | 'abstain_reason'>;
+  type RenderableAnswer = Pick<Answer, 'text' | 'kpis' | 'widgets' | 'mode' | 'provenance' | 'reason' | 'abstain_reason' | 'meta'>;
 
   // Function to render an answer to the chat
   const renderAnswer = (ans: RenderableAnswer) => {
@@ -192,6 +192,38 @@ const ChatPanel: React.FC = () => {
       };
       setMessages(prevMessages => [...prevMessages, kpiMessage]);
     }
+
+    // Include widgets (rendered as compact JSON) if provided
+    if (ans.widgets) {
+      const widgetsText = 'Widgets\n' + '```json\n' + JSON.stringify(ans.widgets, null, 2) + '\n```';
+      const widgetsMessage: Message = {
+        id: generateId(),
+        text: widgetsText,
+        type: 'bot',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, widgetsMessage]);
+    }
+
+    // Add concise provenance footer for traceability
+    const prov = ans.provenance || {};
+    const footerParts: string[] = [];
+    const footerDomain = ans.meta?.domain || domain || 'n/a';
+    if (prov.source) footerParts.push(`source=${prov.source}`);
+    if (prov.tag) footerParts.push(`tag=${prov.tag}`);
+    if (prov.template_id || templateId) footerParts.push(`template=${prov.template_id || templateId}`);
+    footerParts.push(`domain=${footerDomain}`);
+    if (ans.meta?.confidence) footerParts.push(`confidence=${ans.meta.confidence}`);
+    if (prov.snapshot) footerParts.push(`snapshot=${prov.snapshot}`);
+    if (prov.error) footerParts.push(`error=${prov.error}`);
+    const footerText = `— provenance: ${footerParts.join(' | ')}`;
+    const footerMessage: Message = {
+      id: generateId(),
+      text: footerText,
+      type: 'bot',
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, footerMessage]);
 
     // Update chat history with the new exchange
     setChatHistory(prev => [

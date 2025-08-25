@@ -60,8 +60,27 @@ export function routeMessage(msg: string): RouteHit {
     return { domain:"performance", template_id:"monthly_gross_trend_v1", params:{ window:"24m" } };
   }
 
-  // Synonym: list all business units -> profitability summary (contains BU list in mock)
+  // Synonym: list all business units -> explicit BU list template id
   if (m.includes("list") && (m.includes("business units") || m.includes("bus"))) {
+    return { domain: "profitability", template_id: "business_units_list_v1", params: {} };
+  }
+
+  // Regional performance explicit cues (canonical): "regional", "by region", or known region names
+  if (
+    m.includes("regional") ||
+    m.includes("by region") ||
+    m.includes("amba") ||
+    m.includes("patagonia") ||
+    m.includes("buenos aires") ||
+    m.includes("cordoba") ||
+    m.includes("córdoba") ||
+    m.includes("mendoza")
+  ) {
+    return { domain: "regional", template_id: "regional_performance_v1", params: { window: "24m" } };
+  }
+
+  // Profitability cues (canonical): "profitability", "margin"
+  if (m.includes("profitability") || m.includes("margin")) {
     return { domain: "profitability", template_id: "profitability_summary_v1", params: {} };
   }
 

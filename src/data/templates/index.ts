@@ -12,6 +12,20 @@ const DATA_MODE = (process.env.DATA_MODE ?? 'mock');
 let MODE_OVERRIDE: 'mock' | 'live' | undefined;
 const isEffectiveLive = () => (MODE_OVERRIDE ? MODE_OVERRIDE === 'live' : DATA_MODE === 'live');
 
+// Map known template IDs back to their domains for Stage-A mock resolution
+const TEMPLATE_ID_TO_DOMAIN: Record<string, string> = {
+  // Performance / BU snapshot
+  business_units_snapshot_yoy_v1: 'business_units',
+  monthly_gross_trend_v1: 'performance',
+  // Counterparties
+  top_counterparties_gross_v1: 'counterparties',
+  // Profitability
+  profitability_summary_v1: 'profitability',
+  business_units_list_v1: 'profitability',
+  // Regional
+  regional_performance_v1: 'regional',
+};
+
 type BusinessUnit = {
   business_unit: string;
   revenue_this_year: number;
@@ -270,6 +284,20 @@ export async function regionalSummary(data?: any): Promise<string> {
 export async function generateTemplateOutput(domain: string, data?: any): Promise<string> {
   try {
     switch (domain) {
+      case 'business_units':
+        // Alias to performance for Stage-A outputs
+        if (!isEffectiveLive()) {
+          return [
+            "## Business Unit Performance (YoY)\n",
+            "* Navigation: €4.5M (+2.7% YoY)",
+            "* Liferafts: €3.2M (-1.5% YoY)",
+            "* Safety Equipment: €2.1M (+1.2% YoY)",
+            "* Training: €1.8M (+0.9% YoY)",
+            "* Overall: €11.6M (+0.4% YoY)"
+          ].join('\n');
+        }
+        // Live path could reuse performance logic; not needed in Stage-A
+        return "Business units detail not available.";
       case 'performance':
         if (!isEffectiveLive()) {
           return [
@@ -549,9 +577,15 @@ export async function runTemplate(key: string, store: any, mode?: 'mock' | 'live
       const foundDomain = Object.keys(reg).find(d => (reg as any)[d]?.templateId === key);
       if (foundDomain) {
         domain = foundDomain;
-      } else if (!isEffectiveLive()) {
-        // Stage-A: unknown key → no data
-        return { kpiSummary: null, templateOutput: null };
+      } else {
+        // Try Stage-A fallback map of template IDs to domains
+        const mapped = TEMPLATE_ID_TO_DOMAIN[key];
+        if (mapped) {
+          domain = mapped;
+        } else if (!isEffectiveLive()) {
+          // Stage-A: unknown key → no data
+          return { kpiSummary: null, templateOutput: null };
+        }
       }
     }
     // Stage-A: if not live and resolved domain not in registry, short-circuit to no data
