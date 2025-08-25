@@ -132,7 +132,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
       meta: {
         domain: route?.domain ?? null,
         confidence: typeof route?.confidence === 'number' ? route.confidence : 1,
-        groundingType: 'drilldown'
+        groundingType: rewriteInfo ? 'llm_rewrite' : 'drilldown'
       },
       provenance: {
         source: RAW_MODE === 'bq' ? 'bq' : (RAW_MODE === 'live' ? 'live' : 'mock'),
