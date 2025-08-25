@@ -120,8 +120,10 @@ export async function runBQ(params: Record<string, any> = {}) {
         const d: any = (resp.diagnostics as any) || {};
         const bq: any = {};
         if (d.jobId) bq.jobId = d.jobId;
+        if (typeof d.ms !== 'undefined') bq.ms = d.ms;
+        if (typeof d.dataset !== 'undefined') bq.dataset = d.dataset;
+        if (typeof d.location !== 'undefined') bq.location = d.location;
         if (typeof d.bytesProcessed !== 'undefined') bq.bytesProcessed = d.bytesProcessed;
-        if (typeof d.executionTime !== 'undefined') bq.ms = d.executionTime;
         if (typeof d.cacheHit !== 'undefined') bq.cacheHit = d.cacheHit;
         const count = Array.isArray(resp.rows) ? resp.rows.length : undefined;
         if (typeof count !== 'undefined') bq.rows = count;
