@@ -103,6 +103,12 @@ export function routeMessage(msg: string): RouteHit {
     return { domain:"performance", template_id:"monthly_gross_trend_v1", params:{ window:"24m" } };
   }
 
+  // Business units list (broad phrasing): business units / divisions / lines of business / LOB
+  const BU_LIST_PAT = /\b(business\s+units?|divisions?|lines?\s+of\s+business|lob?s?)\b/i;
+  if (BU_LIST_PAT.test(m)) {
+    return { domain: "business_units", template_id: "business_units_list_v1", params: {} };
+  }
+
   // Synonym: list all business units -> explicit BU list template id
   if (m.includes("list") && (m.includes("business units") || m.includes("bus"))) {
     return { domain: "business_units", template_id: "business_units_list_v1", params: {} };
