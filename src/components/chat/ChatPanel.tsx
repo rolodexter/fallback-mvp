@@ -303,30 +303,17 @@ const ChatPanel: React.FC = () => {
       ? "/.netlify/functions/chat"
       : "/api/chat";
 
-    // Step 1: Deterministic routing for canonical prompts
+    // Step 1: Deterministic routing for canonical prompts (client hint only)
     const r = routeMessage(message);
     console.info('[ROUTE]', r);
-    
-    // If no valid route, show intro message
-    if (!r?.domain || !r.template_id) {
-      console.info('[ChatPanel] No domain/template detected, showing intro/nodata locally');
-      setIsLoading(false);
-      
-      // Show intro/nodata with example chips and scope hint
-      const introMessage: Message = {
-        id: generateId(),
-        text: "Stage-A (mock): deterministic answers for BU snapshot, counterparties YTD, monthly gross trend.",
-        type: 'bot',
-        timestamp: new Date()
-      };
-      
-      setMessages(prev => [...prev, introMessage]);
-      return;
+    // Only set domain/template when routing succeeds; always continue to call API
+    if (r?.domain && r.template_id) {
+      setDomain(r.domain);
+      setTemplateId(r.template_id);
+    } else {
+      setDomain(undefined);
+      setTemplateId('');
     }
-    
-    // Update UI state with detected domain and template
-    setDomain(r.domain);
-    setTemplateId(r.template_id);
 
     try {
       // Stage-A payload typing for compile-time safety

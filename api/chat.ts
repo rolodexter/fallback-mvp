@@ -47,16 +47,18 @@ export default async function handler(request: VercelRequest, response: VercelRe
   const originalMessage = userMessage;
   let message = userMessage;
   let rewriteInfo: any = null;
+  let rewriteApplied = false;
   try {
     const { rewriteMessage } = await import('../src/services/semanticRewrite.js');
     const out = await rewriteMessage(originalMessage);
     const thresh = Number(process.env.LLM_REWRITE_CONFIDENCE ?? 0.6);
     if (out && (out.confidence ?? 0) >= thresh) {
       message = out.canonical;
-      rewriteInfo = { groundingType: 'llm_rewrite', rewriteConfidence: out.confidence, originalMessage, rewritten: message };
+      rewriteApplied = true;
+      rewriteInfo = { tag: 'LLM_REWRITE_APPLIED', rewriteConfidence: out.confidence, originalMessage, rewritten: message };
     }
   } catch (e) {
-    rewriteInfo = { groundingType: 'llm_rewrite', tag: 'LLM_REWRITE_FAIL', originalMessage };
+    rewriteInfo = { tag: 'LLM_REWRITE_FAIL', error: (e as any)?.message ?? String(e), originalMessage };
   }
 
   // 3) Lazy import the router with guard
@@ -132,7 +134,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
       meta: {
         domain: route?.domain ?? null,
         confidence: typeof route?.confidence === 'number' ? route.confidence : 1,
-        groundingType: rewriteInfo ? 'llm_rewrite' : 'drilldown'
+        groundingType: rewriteApplied ? 'llm_rewrite' : 'drilldown'
       },
       provenance: {
         source: RAW_MODE === 'bq' ? 'bq' : (RAW_MODE === 'live' ? 'live' : 'mock'),
@@ -142,6 +144,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
         params: route.params,
         router_debug: route,
         bq: bqDiag || undefined,
+        rewriteApplied: rewriteApplied || undefined,
         ...(rewriteInfo ?? {})
       }
     });
