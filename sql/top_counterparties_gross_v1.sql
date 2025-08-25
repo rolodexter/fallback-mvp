@@ -1,7 +1,7 @@
 -- Top Counterparties by Gross (YTD)
 -- Parameters:
 -- @year: The year to analyze (defaults server-side to latest complete year)
--- @limit: Number of counterparties to return (default 5)
+-- @top: Number of counterparties to return (default 5)
 
 SELECT
   counterparty_name,
@@ -11,4 +11,4 @@ SELECT
 FROM `Base_IDP_TopCounterparties`
 WHERE report_year = @year
 ORDER BY gross_amount DESC
-LIMIT @limit;
+LIMIT @top;

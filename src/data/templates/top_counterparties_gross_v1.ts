@@ -34,7 +34,7 @@ export async function runMock(_: Record<string, any> = {}) {
 }
 
 export async function runBQ(params: Record<string, any> = {}) {
-  const effectiveParams = { limit: 5, ...params };
+  const effectiveParams = { top: 5, ...params };
   const resp = await executeBigQuery('top_counterparties_gross_v1', effectiveParams);
   if (!resp.success || !resp.rows) {
     const mock = await runMock({});
@@ -44,7 +44,7 @@ export async function runBQ(params: Record<string, any> = {}) {
     };
   }
 
-  const rows = (resp.rows as Row[]).slice(0, effectiveParams.limit);
+  const rows = (resp.rows as Row[]).slice(0, effectiveParams.top);
   return {
     templateOutput: {
       text: 'Top 5 counterparties YTD.',
