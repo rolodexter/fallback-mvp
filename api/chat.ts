@@ -178,7 +178,7 @@ export default async function handler(
             }
           });
         }
-        const templateData = await runTemplateFn(templateId, templateParams, 'mock');
+        const templateData = await runTemplateFn(templateId, templateParams, 'live');
         
         groundingData = {
           domain: serverDomain,
