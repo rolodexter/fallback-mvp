@@ -25,23 +25,23 @@ export interface BigQueryResponse {
 function getBaseUrl(): string {
   // If window is defined, we're in the browser
   if (typeof window !== 'undefined') {
-    // Check for platform-specific environment variable
     const platform = import.meta.env.VITE_DEPLOY_PLATFORM;
-    
-    // Use window location as base
     const origin = window.location.origin;
-    
-    // If explicitly set to netlify
-    if (platform === 'netlify') {
-      return `${origin}/.netlify/functions`;
-    }
-    
-    // Otherwise default to Vercel-style API routes
+    if (platform === 'netlify') return `${origin}/.netlify/functions`;
     return `${origin}/api`;
   }
-  
-  // Fallback for SSR (though this client is primarily for browser use)
-  return '/api';
+
+  // Server-side (Node) requires an absolute URL
+  const vercelUrl = process.env.VERCEL_URL; // e.g. my-app.vercel.app
+  if (vercelUrl) return `https://${vercelUrl}/api`;
+
+  // Netlify provides URL/DEPLOY_URL
+  const netlifyUrl = process.env.URL || process.env.DEPLOY_URL; // e.g. https://site.netlify.app
+  if (netlifyUrl) return `${netlifyUrl.replace(/\/$/, '')}/.netlify/functions`;
+
+  // Local dev fallback
+  const port = process.env.PORT || '3000';
+  return `http://127.0.0.1:${port}/api`;
 }
 
 /**

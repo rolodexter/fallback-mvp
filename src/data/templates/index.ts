@@ -285,8 +285,35 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
   try {
     switch (domain) {
       case 'business_units':
-        // Alias to performance for Stage-A outputs
+        // If params provided (unit/month), craft a unit-specific month snapshot in Stage-A
         if (!isEffectiveLive()) {
+          const unit = (data && (data.unit || data.bu)) ? (data.unit || data.bu) : undefined;
+          const monthIso = data && data.month ? String(data.month) : undefined;
+          if (unit || monthIso) {
+            // Format month label
+            let monthLabel = '';
+            try {
+              const d = monthIso ? new Date(monthIso) : new Date();
+              monthLabel = d.toLocaleString('en-US', { month: 'short', year: 'numeric' });
+            } catch {
+              const now = new Date();
+              monthLabel = now.toLocaleString('en-US', { month: 'short', year: 'numeric' });
+            }
+            const u = unit ? String(unit).toUpperCase() : 'Z001';
+            // Deterministic mock figures
+            const curMEUR = 2.40;
+            const prvMEUR = 2.10;
+            const yoyMEUR = +(curMEUR - prvMEUR).toFixed(2);
+            return [
+              `## ${u} — ${monthLabel} snapshot (YoY)`,
+              '',
+              `* Revenue (month): €${curMEUR.toFixed(2)}M (prev: €${prvMEUR.toFixed(2)}M)`,
+              `* YoY Δ: €${yoyMEUR.toFixed(2)}M`,
+              `* Invoices: 310 (prev: 280)`,
+              `* AR Days: 38 (prev: 45)`,
+            ].join('\n');
+          }
+          // Fallback to generic BU performance when no params
           return [
             "## Business Unit Performance (YoY)\n",
             "* Navigation: €4.5M (+2.7% YoY)",
@@ -296,8 +323,63 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
             "* Overall: €11.6M (+0.4% YoY)"
           ].join('\n');
         }
-        // Live path could reuse performance logic; not needed in Stage-A
-        return "Business units detail not available.";
+        // Live path: honor unit/month/year params and fetch from BigQuery
+        try {
+          const unit = (data && (data.unit || data.bu)) ? String(data.unit || data.bu).toUpperCase() : undefined;
+          const monthIso = data && data.month ? String(data.month) : undefined;
+          const yearParam: number | undefined = data && data.year ? Number(data.year) : undefined;
+
+          // Build month label for header (non-fatal if parsing fails)
+          let monthLabel = '';
+          try {
+            const d = monthIso ? new Date(monthIso) : new Date();
+            monthLabel = d.toLocaleString('en-US', { month: 'short', year: 'numeric' });
+          } catch {
+            const now = new Date();
+            monthLabel = now.toLocaleString('en-US', { month: 'short', year: 'numeric' });
+          }
+
+          // Always request at least year for the snapshot (default: latest complete year per API)
+          const params: Record<string, any> = {};
+          if (typeof yearParam === 'number' && !Number.isNaN(yearParam)) params.year = yearParam;
+
+          const resp = await executeBigQuery('business_units_snapshot_yoy_v1', params);
+          if (!resp.success || !resp.rows) {
+            return "Business units detail not available.";
+          }
+
+          // If unit specified, narrow to that row; otherwise, pick top by revenue_this_year
+          type Row = { business_unit: string; revenue_this_year: number; revenue_last_year: number; yoy_growth_pct: number };
+          const rows = resp.rows as Row[];
+          let row: Row | undefined = undefined;
+          if (unit) {
+            row = rows.find(r => String(r.business_unit).toUpperCase() === unit);
+          }
+          if (!row) {
+            row = [...rows].sort((a, b) => (b.revenue_this_year ?? 0) - (a.revenue_this_year ?? 0))[0];
+          }
+          if (!row) return "Business units detail not available.";
+
+          const cur = Number(row.revenue_this_year ?? 0);
+          const prev = Number(row.revenue_last_year ?? 0);
+          const yoyPct = Number(row.yoy_growth_pct ?? ((cur - prev) / Math.max(prev, 1) * 100));
+          const u = unit || String(row.business_unit || 'BU');
+
+          const curMEUR = cur / 1_000_000;
+          const prvMEUR = prev / 1_000_000;
+          const yoyMEUR = curMEUR - prvMEUR;
+
+          return [
+            `## ${u} — ${monthLabel} snapshot (YoY)`,
+            '',
+            `* Revenue (year-to-date or period): €${curMEUR.toFixed(2)}M (prev: €${prvMEUR.toFixed(2)}M)`,
+            `* YoY Δ: €${yoyMEUR.toFixed(2)}M (${yoyPct >= 0 ? '+' : ''}${yoyPct.toFixed(1)}%)`,
+            `* Source: BigQuery template business_units_snapshot_yoy_v1`
+          ].join('\n');
+        } catch (e) {
+          console.error('Live BU snapshot generation failed:', e);
+          return "Business units detail not available.";
+        }
       case 'performance':
         if (!isEffectiveLive()) {
           return [

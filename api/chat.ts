@@ -8,10 +8,7 @@ type DataMode = 'mock' | 'live';
 
 // No dotenv in serverless functions; rely on platform env
 
-// Normalize template hint from client (can be string or object with id)
-type TemplateHint = string | { id?: string } | null | undefined;
-const getTemplateId = (t: TemplateHint): string | undefined =>
-  typeof t === 'string' ? t : (t && typeof t === 'object' ? t.id : undefined);
+// (removed unused helper)
 
 type ChatRequest = {
   message: string;
@@ -56,15 +53,16 @@ export default async function handler(
     return response.status(405).json({ error: 'Method Not Allowed' });
   }
   
-  // Check which data mode we're in (mock or live); default to mock for Stage-A
-  const dataMode: DataMode = ((process.env.DATA_MODE ?? 'mock') === 'live') ? 'live' : 'mock';
+  // Check which data mode we're in (mock or live); treat 'bq' as live for preview safety
+  const RAW_DATA_MODE = process.env.DATA_MODE ?? 'mock';
+  const dataMode: DataMode = (RAW_DATA_MODE === 'live' || RAW_DATA_MODE === 'bq') ? 'live' : 'mock';
   console.log(`[Vercel] Using data mode: ${dataMode}`);
   
-  // Only require LLM-related env vars when actually needed (live mode or narrative polishing)
-  const requireLLM = (dataMode === 'live') || (process.env.POLISH_NARRATIVE === 'true');
+  // Only require LLM-related env vars when narrative polishing is explicitly enabled
+  const requireLLM = (process.env.POLISH_NARRATIVE === 'true');
   if (requireLLM) {
     const requiredEnvVars = ['PROVIDER', 'PERPLEXITY_API_KEY'];
-    if (dataMode === 'live') {
+    if (requireLLM) {
       requiredEnvVars.push('GOOGLE_APPLICATION_CREDENTIALS');
     }
     const missingVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
@@ -178,7 +176,7 @@ export default async function handler(
             }
           });
         }
-        const templateData = await runTemplateFn(templateId, templateParams, 'live');
+        const templateData = await runTemplateFn(templateId, templateParams, dataMode);
         
         groundingData = {
           domain: serverDomain,
@@ -215,7 +213,7 @@ export default async function handler(
             }
           });
         }
-        const templateData = await runTemplateFn(templateId, templateParams, 'mock');
+        const templateData = await runTemplateFn(templateId, templateParams, 'live');
         
         groundingData = {
           domain: serverDomain,
@@ -266,12 +264,11 @@ export default async function handler(
     
     // For template/mock data mode, we can use the template output directly
     if (templateOutput) {
-      // In mock mode or when using templates directly, we can use the template output directly
-      if (dataMode === 'mock') {
-        // Stage-A: never call LLM/polish when in mock mode
+      // If polishing is disabled, always use template output directly
+      if (process.env.POLISH_NARRATIVE !== 'true') {
         responseText = templateOutput;
       } else {
-        // In live mode, use the template output to guide the LLM
+        // In polish mode, use the template output to guide the LLM
         systemPrompt = `You are Riskill, a financial data analysis assistant. Answer the question using ONLY the data and text provided below. If you cannot answer the question with the provided data, say "I don't have that information available." DO NOT make up any data or statistics that are not provided.
 
 KPI SUMMARY:\n${kpiSummary || 'No KPI summary available.'}
