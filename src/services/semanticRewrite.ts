@@ -1,13 +1,27 @@
 // ESM module. No external deps; works with your existing llmProvider.
+import { BU_ALIASES } from "../data/router/bu_aliases.js";
 export type RewriteOut = { canonical: string; confidence: number; rationale?: string };
 
 // Extract tokens we must preserve (keeps router deterministic)
+function norm(s: string) {
+  return s.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function resolveAliasToUnit(message: string): string | null {
+  const m = norm(message);
+  for (const [k, code] of Object.entries(BU_ALIASES)) {
+    const key = norm(k);
+    const r = new RegExp(`(^|\\s)${key}(\\s|$)`);
+    if (r.test(m)) return code.toUpperCase();
+  }
+  return null;
+}
+
 function extractTokens(msg: string) {
-  const unit = (msg.match(/\bZ\d{3}\b/i) || [])[0]?.toUpperCase() || null;
+  const aliasUnit = resolveAliasToUnit(msg);
+  const unit = aliasUnit ?? (msg.match(/\bZ\d{3}\b/i) || [])[0]?.toUpperCase() || null;
   const year = (msg.match(/\b(20\d{2})\b/) || [])[1] || null;
-  const month = (msg.match(
-    /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i
-  ) || [])[1] || null;
+  const month = (msg.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\b/i) || [])[0] || null;
   return { unit, year, month };
 }
 
@@ -22,6 +36,13 @@ function heuristicRewrite(message: string): RewriteOut | null {
   const wantsList = /(list|show|display)\s+(business\s*)?units\b|\bunits\b/i.test(message);
   const wantsSnapshot = /\bsnapshot|overview|bu\b/i.test(message) || !!unit;
 
+  // BU name/case like "tell me about our liferafts business"
+  if (unit && /(business|bu|unit|division|line)/i.test(message)) {
+    if (month) return { canonical: `${unit} ${month} snapshot`, confidence: 0.72 };
+    if (year)  return { canonical: `${unit} ${year}`,           confidence: 0.72 };
+    return       { canonical: `${unit} snapshot`,               confidence: 0.70 };
+  }
+
   if (wantsTopN) return { canonical: "Top counterparties YTD", confidence: 0.65 };
   if (wantsTrend) return { canonical: "Monthly gross trend", confidence: 0.65 };
   if (wantsList) return { canonical: "List business units", confidence: 0.6 };
@@ -30,6 +51,11 @@ function heuristicRewrite(message: string): RewriteOut | null {
     if (month) return { canonical: `${unit} ${month} snapshot`, confidence: 0.6 };
     if (year)  return { canonical: `${unit} ${year}`, confidence: 0.6 };
     return { canonical: `${unit} snapshot`, confidence: 0.55 };
+  }
+  if (unit) {
+    if (month) return { canonical: `${unit} ${month} snapshot`, confidence: 0.65 };
+    if (year)  return { canonical: `${unit} ${year}`,           confidence: 0.65 };
+    return       { canonical: `${unit} snapshot`,               confidence: 0.60 };
   }
   return null;
 }
@@ -127,11 +153,18 @@ async function callLLM(message: string): Promise<RewriteOut | null> {
     const parsed = parseJsonLoose(String(text));
     if (!parsed || typeof parsed?.canonical !== "string") return null;
 
-    // Ensure tokens weren’t lost
-    const { unit, year, month } = extractTokens(message);
+    // Ensure tokens weren’t lost and alias codes are injected when needed
+    const { unit: unitFromMsg, year, month } = extractTokens(message);
     let canonical = parsed.canonical.trim();
-    if (unit && !canonical.toUpperCase().includes(unit)) canonical = `${unit} ${canonical}`.trim();
-    if (month && !new RegExp(month, "i").test(canonical) && !year) canonical = `${canonical} ${month}`.trim();
+    const unitFromCanonical = (canonical.match(/\bZ\d{3}\b/i) || [])[0]?.toUpperCase() || null;
+    const unitFinal = unitFromCanonical ?? unitFromMsg;
+
+    if (unitFinal && !canonical.toUpperCase().includes(unitFinal)) {
+      canonical = `${unitFinal} ${canonical}`.trim();
+    }
+    if (month && !new RegExp(month, "i").test(canonical) && !year) {
+      canonical = `${canonical} ${month}`.trim();
+    }
 
     return { canonical, confidence: Number(parsed.confidence ?? 0) };
   } catch {
