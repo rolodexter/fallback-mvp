@@ -673,7 +673,7 @@ export async function runTemplate(
     }
 
     // Legacy fallback path: use summary + detailed generators
-    if (isDomain) {
+    if ((reg as any)[domain]) {
       const summaryFn = getTemplateSummaryFunction(domain);
       const kpiSummary = summaryFn ? await summaryFn(store) : null;
       const out = await generateTemplateOutput(domain, store);

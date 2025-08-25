@@ -59,6 +59,25 @@ export function routeMessage(msg: string): RouteHit {
     };
   }
 
+  // BU snapshot: allow year-only or generic "Z001 snapshot" without month
+  if (bu && m.includes("snapshot") && !mon) {
+    const yearMatch = m.match(/\b(20\d{2}|19\d{2})\b/);
+    const inferredYear = yearMatch ? parseInt(yearMatch[1], 10) : (new Date().getFullYear() - 1);
+    return {
+      domain: "business_units",
+      template_id: "business_units_snapshot_yoy_v1",
+      params: { unit: bu[0].toUpperCase(), year: inferredYear }
+    };
+  }
+
+  // BU year mention like "Z001 2024" (no explicit snapshot/month)
+  if (bu && !mon) {
+    const yearMatch = m.match(/\b(20\d{2}|19\d{2})\b/);
+    if (yearMatch) {
+      return { domain: "business_units", template_id: "business_units_snapshot_yoy_v1", params: { unit: bu[0].toUpperCase(), year: parseInt(yearMatch[1], 10) } };
+    }
+  }
+
   if (m.includes("counterparties") && (m.includes("ytd") || m.includes("year to date"))) {
     return { domain:"counterparties", template_id:"top_counterparties_gross_v1", params:{ range:"ytd" } };
   }
@@ -69,7 +88,18 @@ export function routeMessage(msg: string): RouteHit {
     return { domain: "counterparties", template_id: "top_counterparties_gross_v1", params: { range: "ytd" } };
   }
 
-  if (m.includes("monthly") && (m.includes("gross") || m.includes("trend"))) {
+  // Counterparties synonyms: top customers / largest accounts / concentration
+  if (m.includes("top customers") || m.includes("largest accounts") || m.includes("concentration")) {
+    return { domain: "counterparties", template_id: "top_counterparties_gross_v1", params: { range: "ytd" } };
+  }
+
+  if (
+    (m.includes("monthly") && (m.includes("gross") || m.includes("trend"))) ||
+    m.includes("trajectory") ||
+    m.includes("run-rate") || m.includes("run rate") ||
+    m.includes("last 6 months") || m.includes("last six months") ||
+    m.includes("trend")
+  ) {
     return { domain:"performance", template_id:"monthly_gross_trend_v1", params:{ window:"24m" } };
   }
 

@@ -95,15 +95,15 @@ export default async function handler(request: VercelRequest, response: VercelRe
   try {
     const tpl = await runTemplate(route.template_id, route.params ?? {}, DATA_MODE);
 
-    // Normalize output: support string or {text, widgets}
-    let text: string = 'No text.';
-    let widgets: any = null;
-    const out = tpl?.templateOutput;
+    // Normalize output: support either top-level { text, widgets } or nested { templateOutput: { text, widgets } }
+    let text: string = (tpl as any)?.text ?? 'No text.';
+    let widgets: any = (tpl as any)?.widgets ?? null;
+    const out = (tpl as any)?.templateOutput;
     if (typeof out === 'string') {
       text = out;
     } else if (out && typeof out === 'object') {
-      text = out.text ?? 'No text.';
-      widgets = out.widgets ?? null;
+      text = text || (out.text ?? 'No text.');
+      widgets = widgets ?? (out.widgets ?? null);
     }
 
     // Pull BigQuery telemetry from per-call template provenance when available

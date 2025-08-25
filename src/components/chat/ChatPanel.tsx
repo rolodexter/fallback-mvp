@@ -178,16 +178,20 @@ const ChatPanel: React.FC = () => {
 
   // Function to render an answer to the chat
   const renderAnswer = (ans: RenderableAnswer) => {
-    if (!ans || !ans.text) {
+    if (!ans) {
       const errorMessage: Message = {
         id: generateId(),
-        text: "No answer text returned. Check /api/chat and network payload.",
+        text: "No answer returned. Check /api/chat and network payload.",
         type: 'error',
         timestamp: new Date()
       };
       setMessages(prevMessages => [...prevMessages, errorMessage]);
       return;
     }
+
+    // Prefer top-level fields, but fall back to templateOutput for backward compatibility
+    const displayText = ans.text ?? (ans as any)?.templateOutput?.text ?? 'No text.';
+    const widgetData = (ans as any)?.widgets ?? (ans as any)?.templateOutput?.widgets ?? null;
 
     // If server indicates abstain/nodata, surface diagnostics prominently
     if (ans.mode && ans.mode !== 'strict') {
@@ -201,7 +205,7 @@ const ChatPanel: React.FC = () => {
       const diag = parts.length ? `\n(${parts.join(' | ')})` : '';
       const errorMessage: Message = {
         id: generateId(),
-        text: `${ans.text}${diag}`,
+        text: `${displayText}${diag}`,
         type: 'error',
         timestamp: new Date()
       };
@@ -212,7 +216,7 @@ const ChatPanel: React.FC = () => {
     // Render the main answer text
     const botMessage: Message = {
       id: generateId(),
-      text: ans.text,
+      text: displayText,
       type: 'bot',
       timestamp: new Date()
     };
@@ -236,13 +240,13 @@ const ChatPanel: React.FC = () => {
     }
 
     // Include widgets (rendered as compact JSON) if provided
-    if (ans.widgets) {
+    if (widgetData) {
       const widgetsMessage: Message = {
         id: generateId(),
         text: '',
         type: 'bot',
         timestamp: new Date(),
-        widget: ans.widgets,
+        widget: widgetData,
       };
       setMessages(prev => [...prev, widgetsMessage]);
     }
@@ -270,7 +274,7 @@ const ChatPanel: React.FC = () => {
     // Update chat history with the new exchange
     setChatHistory(prev => [
       ...prev,
-      { role: 'assistant', content: ans.text }
+      { role: 'assistant', content: displayText }
     ]);
   };
 
