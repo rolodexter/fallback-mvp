@@ -43,7 +43,18 @@ export function routeMessage(msg: string): RouteHit {
   const monKey = Object.keys(MONTHS_MAP).find(x => m.includes(x));
   const mon = monKey ? MONTHS_MAP[monKey] : undefined;
   if (bu && mon && m.includes("snapshot")) {
-    return { domain:"business_units", template_id:"business_units_snapshot_yoy_v1", params:{ bu: bu[0].toUpperCase(), month: mon } };
+    // Build first-of-month ISO (YYYY-MM-01) using current year when not specified
+    const months = [
+      'january','february','march','april','may','june','july','august','september','october','november','december'
+    ];
+    const year = new Date().getFullYear();
+    const monthIndex = months.indexOf(mon) + 1;
+    const monthIso = `${year}-${String(monthIndex).padStart(2,'0')}-01`;
+    return {
+      domain: "business_units",
+      template_id: "business_units_snapshot_yoy_v1",
+      params: { unit: bu[0].toUpperCase(), month: monthIso, year }
+    };
   }
 
   if (m.includes("counterparties") && (m.includes("ytd") || m.includes("year to date"))) {
