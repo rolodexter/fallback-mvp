@@ -363,33 +363,6 @@ BIGQUERY DATA:\n${resultsText}`;
           provenance: {
             source: dataMode,
             template_id: providedTemplateId || domainToUse,
-            params: params || {}
-          }
-        });
-      } else {
-        // Live mode: allow generic LLM call
-        systemPrompt = `You are Riskill, a financial data analysis assistant. Answer questions about financial KPIs and business metrics. If you don't know the answer, say "I don't have that information available." DO NOT make up data.`;
-        // Lazy-load LLM provider
-        let callLLMProvider: any;
-        try {
-          ({ callLLMProvider } = await import('../src/services/llmProvider'));
-        } catch (err) {
-          return response.status(200).json({
-            mode: 'abstain',
-            text: 'Dependency unavailable',
-            provenance: {
-              source: dataMode,
-              tag: 'IMPORT_LLM_FAIL',
-              error: err instanceof Error ? err.message : String(err)
-            }
-          });
-        }
-        responseText = await callLLMProvider(message, systemPrompt, [], null, null);
-      }
-    }
-    
-    // Extract widgets from template data if available
-    if (groundingData && groundingData.kpiSummary) {
       try {
         const kpiData = JSON.parse(groundingData.kpiSummary);
         if (kpiData && typeof kpiData === 'object') {
