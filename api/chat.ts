@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
  
  // Vercel Node runtime configuration
- export const config = { runtime: "nodejs18.x" };
+ export const config = { runtime: "nodejs" };
 
 // Supported data modes
 type DataMode = 'mock' | 'live';
@@ -349,7 +349,7 @@ BIGQUERY DATA:\n${resultsText}`;
         // Stage-A: do not call LLM, return abstain deterministically
         return response.status(200).json({
           mode: 'abstain',
-          text: 'I don't have the data you're looking for right now.',
+          text: "I don't have the data you're looking for right now.",
           abstain_reason: 'no_grounding_data',
           meta: {
             domain: domainToUse,
@@ -421,12 +421,19 @@ BIGQUERY DATA:\n${resultsText}`;
         console.error(`Development error: ${error.message}`);
       }
     }
+    // Telemetry: log stack for rapid diagnosis
+    if (error && typeof (error as any).stack === 'string') {
+      console.error('[CHAT_RUNTIME]', (error as any).stack);
+    } else {
+      console.error('[CHAT_RUNTIME] no-stack');
+    }
     // Fail-safe: never 500 in Stage-A; return deterministic abstain
     return response.status(200).json({
       mode: 'abstain',
       text: 'Runtime guard activated. See Functions logs for details.',
       provenance: {
         source: (typeof dataMode !== 'undefined' ? dataMode : 'mock'),
+        tag: 'CHAT_RUNTIME',
         error: error instanceof Error ? error.message : String(error)
       }
     });
