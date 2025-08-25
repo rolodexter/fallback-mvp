@@ -3,8 +3,8 @@
  * These functions provide summary information for different domains
  */
 
-import { executeBigQuery, mapDomainToTemplateId } from '../../services/bigQueryClient.js';
-import templateRegistry from './template_registry.js';
+import { executeBigQuery } from '../../services/bigQueryClient.js';
+import templateRegistry, { templateRunners } from './template_registry.js';
 
 // Stage-A default: mock mode
 const DATA_MODE = (process.env.DATA_MODE ?? 'mock');
@@ -281,7 +281,7 @@ export async function regionalSummary(data?: any): Promise<string> {
  * @param data Optional data from BigQuery
  * @returns Detailed template output as string or Promise<string>
  */
-type BQDiag = { ms?: number; jobId?: string; dataset?: string; location?: string; query?: string; params?: Record<string, any> };
+type BQDiag = { ms?: number; jobId?: string; dataset?: string; location?: string; rows?: number };
 type TemplateDetail = { text: string; widgets?: any; provenance?: { source?: string; tag?: string; bq?: BQDiag; unit?: string; monthIso?: string; template_id?: string } };
 
 export async function generateTemplateOutput(domain: string, data?: any): Promise<string | TemplateDetail> {
@@ -443,7 +443,7 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
         if (data?.rows) {
           counterparties = data.rows;
         } else {
-          const response = await executeBigQuery('top_counterparties_gross_v1', { limit: 5 });
+          const response = await executeBigQuery('top_counterparties_gross_v1', { top: 5 });
           if (!response.success || !response.rows?.length) {
             // Fallback to mock data
             return "Top 5 counterparties YTD not available.";
@@ -634,8 +634,10 @@ export function getTemplateSummaryFunction(domain: string): ((data: any) => Prom
  * @returns The BigQuery SQL template ID
  */
 export function getBigQueryTemplateId(domain: string): string {
-  // Use the mapDomainToTemplateId function from bigQueryClient
-  return mapDomainToTemplateId(domain);
+  const reg = getTemplateRegistry();
+  const id = (reg as any)?.[domain]?.templateId;
+  if (!id) throw new Error(`Unknown domain: ${domain}`);
+  return id;
 }
 
 /**
@@ -649,54 +651,47 @@ export async function runTemplate(
   key: string,
   store: any,
   mode?: 'mock' | 'live'
-): Promise<{ kpiSummary: string | null; templateOutput: { text: string; widgets?: any } | null; provenance?: any }> {
+): Promise<{ kpiSummary: any; templateOutput: { text: string; widgets?: any } | null; provenance?: any }> {
   try {
     // Apply runtime mode override for Stage-A locking
     MODE_OVERRIDE = mode;
-    // Resolve key to a domain: key may be a domain or a templateId
+    // Resolve key to a concrete templateId and domain
     const reg = getTemplateRegistry();
-    let domain = key;
-    if (reg && !(key in reg)) {
-      const foundDomain = Object.keys(reg).find(d => (reg as any)[d]?.templateId === key);
-      if (foundDomain) {
-        domain = foundDomain;
-      } else {
-        // Try Stage-A fallback map of template IDs to domains
-        const mapped = TEMPLATE_ID_TO_DOMAIN[key];
-        if (mapped) {
-          domain = mapped;
-        } else if (!isEffectiveLive()) {
-          // Stage-A: unknown key → no data
-          return { kpiSummary: null, templateOutput: null };
+    const isDomain = !!(reg as any)?.[key];
+    const domain = isDomain ? key : (Object.keys(reg).find(d => (reg as any)[d]?.templateId === key) || TEMPLATE_ID_TO_DOMAIN[key] || key);
+    const templateId = isDomain ? ((reg as any)[domain]?.templateId) : key;
+
+    // If we have a module runner for this template, use it as the single source of truth
+    const runner = (templateId && (templateRunners as any)[templateId]) || undefined;
+    if (runner && typeof runner === 'object') {
+      const run = (MODE_OVERRIDE ? MODE_OVERRIDE === 'live' : DATA_MODE === 'live') ? runner.runBQ : runner.runMock;
+      if (typeof run === 'function') {
+        const result = await run(store ?? {});
+        const { templateOutput = null, kpiSummary = null, provenance } = result || {};
+        return { kpiSummary, templateOutput, provenance };
+      }
+    }
+
+    // Legacy fallback path: use summary + detailed generators
+    if (isDomain) {
+      const summaryFn = getTemplateSummaryFunction(domain);
+      const kpiSummary = summaryFn ? await summaryFn(store) : null;
+      const out = await generateTemplateOutput(domain, store);
+      let templateOutput: { text: string; widgets?: any } | null = null;
+      let provenance: any = undefined;
+      if (out) {
+        if (typeof out === 'string') {
+          templateOutput = { text: out, widgets: null };
+        } else if (typeof out === 'object') {
+          templateOutput = { text: out.text, widgets: out.widgets ?? null };
+          provenance = out.provenance;
         }
       }
-    }
-    // Stage-A: if not live and resolved domain not in registry, short-circuit to no data
-    if (!isEffectiveLive()) {
-      if (!reg || !(domain in reg)) {
-        return { kpiSummary: null, templateOutput: null };
-      }
-    }
-    // Get the summary function for the domain
-    const summaryFn = getTemplateSummaryFunction(domain);
-    
-    // Generate KPI summary if a summary function exists
-    const kpiSummary = summaryFn ? await summaryFn(store) : null;
-
-    // Generate detailed template output and normalize to structured object
-    const out = domain ? await generateTemplateOutput(domain, store) : null;
-    let templateOutput: { text: string; widgets?: any } | null = null;
-    let provenance: any = undefined;
-    if (out) {
-      if (typeof out === 'string') {
-        templateOutput = { text: out, widgets: null };
-      } else if (typeof out === 'object') {
-        templateOutput = { text: out.text, widgets: out.widgets ?? null };
-        provenance = out.provenance;
-      }
+      return { kpiSummary, templateOutput, provenance };
     }
 
-    return { kpiSummary, templateOutput, provenance };
+    // Unknown key and no runner
+    return { kpiSummary: null, templateOutput: null };
   } catch (error) {
     console.error(`Error running template for ${key}:`, error);
     return { kpiSummary: null, templateOutput: null };
