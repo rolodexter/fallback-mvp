@@ -538,13 +538,24 @@ export function getBigQueryTemplateId(domain: string): string {
  * @param store The store data to use for the template
  * @returns Promise resolving to object with kpiSummary and templateOutput
  */
-export async function runTemplate(domain: string, store: any, mode?: 'mock' | 'live'): Promise<{ kpiSummary: string | null, templateOutput: string | null }> {
+export async function runTemplate(key: string, store: any, mode?: 'mock' | 'live'): Promise<{ kpiSummary: string | null, templateOutput: string | null }> {
   try {
     // Apply runtime mode override for Stage-A locking
     MODE_OVERRIDE = mode;
-    // Stage-A: if not live and domain not in registry, short-circuit to no data
+    // Resolve key to a domain: key may be a domain or a templateId
+    const reg = getTemplateRegistry();
+    let domain = key;
+    if (reg && !(key in reg)) {
+      const foundDomain = Object.keys(reg).find(d => (reg as any)[d]?.templateId === key);
+      if (foundDomain) {
+        domain = foundDomain;
+      } else if (!isEffectiveLive()) {
+        // Stage-A: unknown key → no data
+        return { kpiSummary: null, templateOutput: null };
+      }
+    }
+    // Stage-A: if not live and resolved domain not in registry, short-circuit to no data
     if (!isEffectiveLive()) {
-      const reg = getTemplateRegistry();
       if (!reg || !(domain in reg)) {
         return { kpiSummary: null, templateOutput: null };
       }
@@ -560,7 +571,7 @@ export async function runTemplate(domain: string, store: any, mode?: 'mock' | 'l
     
     return { kpiSummary, templateOutput };
   } catch (error) {
-    console.error(`Error running template for ${domain}:`, error);
+    console.error(`Error running template for ${key}:`, error);
     return { kpiSummary: null, templateOutput: null };
   } finally {
     // Clear override after each run to avoid leaking state

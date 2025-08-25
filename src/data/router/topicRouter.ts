@@ -50,6 +50,12 @@ export function routeMessage(msg: string): RouteHit {
     return { domain:"counterparties", template_id:"top_counterparties_gross_v1", params:{ range:"ytd" } };
   }
 
+  // Top counterparties without explicit YTD qualifier
+  if ((m.includes("top 3 counterparties") || m.includes("top counterparties")) && !m.includes("ytd") && !m.includes("year to date")) {
+    // Default to YTD in Stage-A when not specified
+    return { domain: "counterparties", template_id: "top_counterparties_gross_v1", params: { range: "ytd" } };
+  }
+
   if (m.includes("monthly") && (m.includes("gross") || m.includes("trend"))) {
     return { domain:"performance", template_id:"monthly_gross_trend_v1", params:{ window:"24m" } };
   }
