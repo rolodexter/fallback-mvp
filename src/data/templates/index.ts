@@ -402,46 +402,30 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
             "* Overall: €11.6M (+0.4% YoY)"
           ].join('\n');
         }
-        // Use provided data or fetch from BigQuery
-        let businessUnits;
-        if (data?.rows) {
-          businessUnits = data.rows;
-        } else {
-          const response = await executeBigQuery('business_units_snapshot_yoy_v1');
-          if (!response.success || !response.rows?.length) {
-            // Fallback to mock data
-            return [
-              "## Business Unit Performance (YoY)\n",
-              "* Navigation: €4.5M (+2.7% YoY)",
-              "* Liferafts: €3.2M (-1.5% YoY)",
-              "* Safety Equipment: €2.1M (+1.2% YoY)",
-              "* Training: €1.8M (+0.9% YoY)",
-              "* Overall: €11.6M (+0.4% YoY)"
-            ].join('\n');
+        // Live performance: monthly gross trend (last 6 months)
+        try {
+          const resp = await executeBigQuery('monthly_gross_trend_v1');
+          if (!resp.success || !resp.rows) {
+            return "Last 6 months gross trend not available.";
           }
-          businessUnits = response.rows;
+          type Row = { yyyymm: string; gross_amount: number };
+          const rows = (resp.rows as Row[])
+            .map(r => ({ x: String(r.yyyymm), y: Number(r.gross_amount || 0) }))
+            .sort((a, b) => a.x.localeCompare(b.x));
+          return {
+            text: 'Last 6 months gross trend.',
+            widgets: { type: 'line', series: [{ name: 'Gross', data: rows }] },
+            provenance: {
+              source: 'bq',
+              tag: 'TEMPLATE_RUN',
+              bq: { ...(resp.diagnostics as BQDiag), rows: Array.isArray(resp.rows) ? resp.rows.length : undefined } as any,
+              template_id: 'monthly_gross_trend_v1'
+            }
+          };
+        } catch (e) {
+          console.error('Live performance trend generation failed:', e);
+          return "Last 6 months gross trend not available.";
         }
-        
-        // Sort by revenue this year
-        const sortedUnits = [...businessUnits].sort((a, b) => b.revenue_this_year - a.revenue_this_year);
-        
-        // Calculate overall totals
-        const totalCurrentRevenue = businessUnits.reduce((sum: number, unit: BusinessUnit) => sum + unit.revenue_this_year, 0);
-        const totalPreviousRevenue = businessUnits.reduce((sum: number, unit: BusinessUnit) => sum + unit.revenue_last_year, 0);
-        const overallGrowth = ((totalCurrentRevenue - totalPreviousRevenue) / totalPreviousRevenue) * 100;
-        
-        // Format output
-        const formattedUnits = sortedUnits.map(unit => {
-          const growthSymbol = unit.yoy_growth_pct >= 0 ? '+' : '';
-          const revenueMil = (unit.revenue_this_year / 1000000).toFixed(1);
-          return `* ${unit.business_unit}: €${revenueMil}M (${growthSymbol}${unit.yoy_growth_pct.toFixed(1)}% YoY)`;
-        }).join('\n');
-        
-        const overallGrowthSymbol = overallGrowth >= 0 ? '+' : '';
-        const totalRevenueMil = (totalCurrentRevenue / 1000000).toFixed(1);
-        const overallLine = `* Overall: €${totalRevenueMil}M (${overallGrowthSymbol}${overallGrowth.toFixed(1)}% YoY)`;
-        
-        return `## Business Unit Performance (YoY)\n\n${formattedUnits}\n${overallLine}`;
       
       case 'counterparties':
         if (!isEffectiveLive()) {
@@ -459,29 +443,20 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
         if (data?.rows) {
           counterparties = data.rows;
         } else {
-          const response = await executeBigQuery('customers_top_n', { limit: 5 });
+          const response = await executeBigQuery('top_counterparties_gross_v1', { limit: 5 });
           if (!response.success || !response.rows?.length) {
             // Fallback to mock data
-            return [
-              "## Top 5 Counterparties (Revenue)\n",
-              "* ACME Corp: €2.1M (18.1%)",
-              "* Globex Marine: €1.8M (15.5%)",
-              "* Oceanic Partners: €1.3M (11.2%)",
-              "* SeaSecure Ltd: €0.9M (7.8%)",
-              "* MarineMax Inc: €0.7M (6.0%)"
-            ].join('\n');
+            return "Top 5 counterparties YTD not available.";
           }
           counterparties = response.rows;
-          // Include telemetry in provenance
-          const formattedCounterparties = counterparties.map((cp: Counterparty) => {
-            const revenueMil = (cp.revenue_amount / 1000000).toFixed(1);
-            const percent = cp.revenue_percent.toFixed(1);
-            return `* ${cp.counterparty_name}: €${revenueMil}M (${percent}%)`;
-          }).join('\n');
+          const tableRows = (counterparties as any[]).map((cp: any) => [
+            cp.counterparty_name,
+            Number(cp.gross_amount ?? cp.revenue_amount ?? 0)
+          ]);
           return {
-            text: `## Top ${counterparties.length} Counterparties (Revenue)\n\n${formattedCounterparties}`,
-            widgets: null,
-            provenance: { source: 'bq', tag: 'TEMPLATE_RUN', bq: { ...(response.diagnostics as BQDiag), rows: Array.isArray(response.rows) ? response.rows.length : undefined } as any, template_id: 'customers_top_n' }
+            text: 'Top 5 counterparties YTD.',
+            widgets: { type: 'table', columns: ['counterparty', 'gross'], rows: tableRows },
+            provenance: { source: 'bq', tag: 'TEMPLATE_RUN', bq: { ...(response.diagnostics as BQDiag), rows: Array.isArray(response.rows) ? response.rows.length : undefined } as any, template_id: 'top_counterparties_gross_v1' }
           };
         }
         
