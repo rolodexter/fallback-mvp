@@ -229,7 +229,7 @@ export default async function handler(
         // Lazy-load templates module
         let runTemplateFn: any;
         try {
-          const mod = await import('../src/data/templates');
+          const mod = await import('../src/data/templates/index.js');
           runTemplateFn = mod.runTemplate;
           if (typeof runTemplateFn !== 'function') throw new Error('runTemplate not found');
         } catch (err) {
