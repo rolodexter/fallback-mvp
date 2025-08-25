@@ -381,7 +381,7 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
             provenance: {
               source: 'bq',
               tag: 'TEMPLATE_RUN',
-              bq: resp.diagnostics as BQDiag,
+              bq: { ...(resp.diagnostics as BQDiag), rows: Array.isArray(resp.rows) ? resp.rows.length : undefined } as any,
               unit,
               monthIso,
               template_id: 'business_units_snapshot_yoy_v1'
@@ -481,7 +481,7 @@ export async function generateTemplateOutput(domain: string, data?: any): Promis
           return {
             text: `## Top ${counterparties.length} Counterparties (Revenue)\n\n${formattedCounterparties}`,
             widgets: null,
-            provenance: { source: 'bq', tag: 'TEMPLATE_RUN', bq: response.diagnostics as BQDiag, template_id: 'customers_top_n' }
+            provenance: { source: 'bq', tag: 'TEMPLATE_RUN', bq: { ...(response.diagnostics as BQDiag), rows: Array.isArray(response.rows) ? response.rows.length : undefined } as any, template_id: 'customers_top_n' }
           };
         }
         
