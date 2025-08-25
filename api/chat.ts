@@ -143,10 +143,10 @@ export default async function handler(
     }
     
     // Determine routing; if client router lacks confidence, compute on server
-    // Lazy-load router to avoid module-init failures
+    // Lazy-load topic router to avoid module-init failures
     let routeMessageFn: any;
     try {
-      const mod = await import('../src/data/router/router.js');
+      const mod = await import('../src/data/router/topicRouter.js');
       routeMessageFn = mod.routeMessage;
       if (typeof routeMessageFn !== 'function') throw new Error('routeMessage not found');
     } catch (err) {
@@ -363,6 +363,33 @@ BIGQUERY DATA:\n${resultsText}`;
           provenance: {
             source: dataMode,
             template_id: providedTemplateId || domainToUse,
+            params: params || {}
+          }
+        });
+      } else {
+        // Live mode: allow generic LLM call
+        systemPrompt = `You are Riskill, a financial data analysis assistant. Answer questions about financial KPIs and business metrics. If you don't know the answer, say "I don't have that information available." DO NOT make up data.`;
+        // Lazy-load LLM provider
+        let callLLMProvider: any;
+        try {
+          ({ callLLMProvider } = await import('../src/services/llmProvider.js'));
+        } catch (err) {
+          return response.status(200).json({
+            mode: 'abstain',
+            text: 'Dependency unavailable',
+            provenance: {
+              source: dataMode,
+              tag: 'IMPORT_LLM_FAIL',
+              error: err instanceof Error ? err.message : String(err)
+            }
+          });
+        }
+        responseText = await callLLMProvider(message, systemPrompt, [], null, null);
+      }
+    }
+
+    // Extract widgets from template data if available
+    if (groundingData && groundingData.kpiSummary) {
       try {
         const kpiData = JSON.parse(groundingData.kpiSummary);
         if (kpiData && typeof kpiData === 'object') {
@@ -389,7 +416,6 @@ BIGQUERY DATA:\n${resultsText}`;
         params: params || {}
       }
     });
-    
   } catch (error) {
     console.error('Error processing request:', error);
     if (error instanceof Error) {
