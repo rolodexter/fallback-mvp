@@ -3,8 +3,8 @@
  * These functions provide summary information for different domains
  */
 
-import { executeBigQuery, mapDomainToTemplateId } from '../../services/bigQueryClient';
-import templateRegistry from './template_registry';
+import { executeBigQuery, mapDomainToTemplateId } from '../../services/bigQueryClient.js';
+import templateRegistry from './template_registry.js';
 
 // Stage-A default: mock mode
 const DATA_MODE = (process.env.DATA_MODE ?? 'mock');
