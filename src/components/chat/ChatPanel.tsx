@@ -132,6 +132,8 @@ const ChatPanel: React.FC = () => {
   const lastAnswerTextRef = useRef<string>('');
   // Remember last successful deterministic route for follow-ups like "tell me more"
   const lastRouteRef = useRef<{ domain?: string; template_id?: string; params?: Record<string, any> } | null>(null);
+  // Stateless session detail knob (0,1,2,...) used for "tell me more" follow-ups
+  const detailRef = useRef<number>(0);
 
   // --- QA helpers: copy to clipboard ---
   const copyToClipboard = async (text: string) => {
@@ -392,6 +394,10 @@ const ChatPanel: React.FC = () => {
     if (!applied && looksLikeFollowup && lastRouteRef.current) {
       applied = lastRouteRef.current;
     }
+    // If this is a follow-up, bump detail knob
+    if (looksLikeFollowup && lastRouteRef.current) {
+      detailRef.current = (detailRef.current || 0) + 1;
+    }
     // Greeting already intercepted above; proceed with routing if not intercepted
     if (applied && applied.domain && applied.template_id) {
       setDomain(applied.domain);
@@ -409,7 +415,8 @@ const ChatPanel: React.FC = () => {
         prevDomain: lastRouteRef.current.domain ?? null,
         prevTemplate: lastRouteRef.current.template_id ?? null,
         prevParams: lastRouteRef.current.params ?? null,
-        prevTop: (typeof (lastRouteRef.current.params?.top) === 'number') ? lastRouteRef.current.params.top : null
+        prevTop: (typeof (lastRouteRef.current.params?.top) === 'number') ? lastRouteRef.current.params.top : null,
+        prevDetail: detailRef.current ?? 0
       } : undefined;
       const payload: ChatPayload = {
         message,
@@ -431,12 +438,17 @@ const ChatPanel: React.FC = () => {
       // Refresh lastRouteRef from server echo if available
       const srvDomain = answer?.meta?.domain ?? (answer?.provenance as any)?.domain;
       const srvTemplateId = (answer?.provenance as any)?.template_id ?? (answer?.provenance as any)?.template;
+      const srvParams = (answer?.provenance as any)?.state?.params;
+      const srvDetail = (answer?.provenance as any)?.state?.detail;
       if (srvDomain && srvTemplateId) {
         lastRouteRef.current = {
           domain: srvDomain,
           template_id: srvTemplateId,
-          params: (applied as any)?.params ?? {}
+          params: (srvParams ?? (applied as any)?.params) ?? {}
         };
+        if (typeof srvDetail === 'number') {
+          detailRef.current = srvDetail;
+        }
       }
     } catch (error) {
       // Handle error in the response
