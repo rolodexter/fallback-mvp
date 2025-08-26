@@ -116,7 +116,7 @@ type ChatHistoryEntry = {
  // Short, common follow-ups that lack domain cues
  const FOLLOWUP_RE = /^(tell me more|continue|more details?|details|expand|what else|go on|show more|drill ?down|yes,? continue)\b/i;
  // Friendly greetings/help that shouldn't error
- const GREETING_RE = /^(hi|hello|hey|howdy|hiya|yo|good\s+(morning|afternoon|evening)|help|start|get started|what can you do)\b/i;
+ const GREETING_RE = /\b(hi|hello|hey|yo|howdy|greetings|good\s+(morning|afternoon|evening)|help|start|get(ting)?\s+started|what\s+can\s+you\s+do)\b/i;
 
 const ChatPanel: React.FC = () => {
   const [message, setMessage] = useState('');
@@ -194,6 +194,32 @@ const ChatPanel: React.FC = () => {
   const generateId = (): string => {
     return Date.now().toString(36) + Math.random().toString(36).substr(2);
   };
+
+  // Push a local overview bot message without hitting the network
+  function pushLocalOverview(setter: React.Dispatch<React.SetStateAction<Message[]>>) {
+    const text = [
+      'Hi — I can show Business Units (YoY), Top Counterparties (YTD), or a Monthly Gross Trend.',
+      'Try:',
+      '• “Z001 2024 snapshot”',
+      '• “Top counterparties YTD”',
+      '• “Monthly gross trend”'
+    ].join('\n');
+    const botMsg: Message = {
+      id: generateId(),
+      text,
+      type: 'bot',
+      timestamp: new Date()
+    };
+    setter(prev => [...prev, botMsg]);
+    // Optional: simple provenance footer for QA
+    const footer: Message = {
+      id: generateId(),
+      text: '— provenance: tag=CLIENT_OVERVIEW | domain=overview',
+      type: 'bot',
+      timestamp: new Date()
+    };
+    setter(prev => [...prev, footer]);
+  }
 
   // Example chip suggestions for intro/nodata responses
   const exampleChips = [
@@ -340,6 +366,17 @@ const ChatPanel: React.FC = () => {
     ];
     setChatHistory(historyToSend);
 
+    // EARLY GREETING INTERCEPT — must run before routing/network
+    const looksLikeGreetingEarly = GREETING_RE.test(message.trim());
+    if (looksLikeGreetingEarly) {
+      setIsLoading(false);
+      // your "append user bubble" already happened above this guard
+      pushLocalOverview(setMessages);
+      // Optional: seed a safe route so "tell me more" after hello works
+      // lastRouteRef.current = { domain: 'business_units', template_id: 'business_units_list_v1', params: {} } as any;
+      return; // ensure no /api/chat call for greetings
+    }
+
     // Determine the endpoint based on platform
     const endpoint = (import.meta.env.VITE_DEPLOY_PLATFORM === "netlify")
       ? "/.netlify/functions/chat"
@@ -355,18 +392,7 @@ const ChatPanel: React.FC = () => {
     if (!applied && looksLikeFollowup && lastRouteRef.current) {
       applied = lastRouteRef.current;
     }
-    // UX hot-patch: if greeting/help and no deterministic route and no prior route, bypass server and render an overview
-    if (!applied && GREETING_RE.test(message) && !lastRouteRef.current) {
-      setIsLoading(false);
-      const localOverview: RenderableAnswer = {
-        text: 'Stage-A overview: You can ask about Business Units (YoY), Top Counterparties, or Monthly Gross Trend.',
-        mode: 'strict',
-        meta: { domain: 'overview' },
-        provenance: { tag: 'client_overview' } as any
-      } as any;
-      renderAnswer(localOverview);
-      return;
-    }
+    // Greeting already intercepted above; proceed with routing if not intercepted
     if (applied && applied.domain && applied.template_id) {
       setDomain(applied.domain);
       setTemplateId(applied.template_id);

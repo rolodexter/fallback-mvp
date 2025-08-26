@@ -178,7 +178,10 @@ export async function rewriteMessage(message: string): Promise<RewriteOut | null
   // Try LLM first (fast + low temperature + short timeout) when enabled
   if (llmEnabled) {
     const llm = await callLLM(message);
-    if (llm) return llm;
+    const threshold = Number(process.env.LLM_REWRITE_CONFIDENCE ?? 0.5);
+    if (llm && (typeof llm.confidence !== 'number' || llm.confidence >= threshold)) {
+      return llm;
+    }
   }
 
   // Always use heuristics as a safety net, even if LLM is disabled

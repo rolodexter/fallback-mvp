@@ -6,6 +6,9 @@ import { routeMessage as topicRouteMessage } from '../../src/data/router/topicRo
 import { runTemplate } from '../../src/data/templates';
 import { rewriteMessage } from '../../src/services/semanticRewrite';
 
+// Broad greeting/help detector used for server-side fallback
+const GREET_RE = /\b(hi|hello|hey|yo|howdy|greetings|good\s+(morning|afternoon|evening)|help|start|get(ting)?\s+started|what\s+can\s+you\s+do)\b/i;
+
 // Supported data modes
 type DataMode = 'mock' | 'live';
 
@@ -164,10 +167,9 @@ const handler: Handler = async (event) => {
     // Deterministic topic routing from canonical or original message (maps to template_id + params)
     let det = topicRouteMessage(canonicalMsg || message) as { domain?: string; template_id?: string; params?: Record<string, any> };
 
-    // Server fallback for greetings/help -> safe BU list template
-    const GREET_RE = /^(hi|hello|hey|howdy|hiya|yo|good\s+(morning|afternoon|evening)|help|start|get started|what can you do)\b/i;
+    // Server fallback for greetings/help -> safe BU list template (broadened)
     let fallbackGreetingApplied = false;
-    if ((!det || !det.template_id) && GREET_RE.test(message)) {
+    if ((!det || !det.template_id) && GREET_RE.test((message || '').trim())) {
       det = { domain: 'business_units', template_id: 'business_units_list_v1', params: {} };
       fallbackGreetingApplied = true;
     }
@@ -384,7 +386,10 @@ BIGQUERY DATA:\n${resultsText}`;
           template_id: domainTemplate,
           source: dataMode,
           platform: 'netlify',
-          fn_dir: 'netlify/functions'
+          fn_dir: 'netlify/functions',
+          tag: fallbackGreetingApplied ? 'SERVER_FALLBACK_GREETING' : undefined,
+          domain: det?.domain,
+          template: domainTemplate
         }
       })
     };
