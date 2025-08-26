@@ -27,6 +27,18 @@ type ChatRequest = {
  */
 const handler: Handler = async (event) => {
   console.log('Netlify function called:', event.httpMethod, event.path);
+  // CORS preflight
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+      },
+      body: ''
+    };
+  }
   
   // Check which data mode we're in (mock or live). Default to mock for Stage-A.
   const dataMode: DataMode = (String(process.env.DATA_MODE || 'mock') === 'mock' ? 'mock' : 'live');
@@ -47,6 +59,12 @@ const handler: Handler = async (event) => {
     console.error(`[ERROR] Missing required environment variables: ${missingVars.join(', ')}`);
     return {
       statusCode: 503,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+      },
       body: JSON.stringify({ 
         mode: 'nodata',
         reason: 'missing_env',
@@ -66,6 +84,12 @@ const handler: Handler = async (event) => {
     console.error(`[ERROR] Unsupported provider: ${provider}`);
     return {
       statusCode: 503,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+      },
       body: JSON.stringify({ 
         mode: 'nodata',
         reason: 'invalid_provider',
@@ -83,6 +107,12 @@ const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+      },
       body: JSON.stringify({ error: 'Method not allowed' })
     };
   }
@@ -95,6 +125,12 @@ const handler: Handler = async (event) => {
     if (!message) {
       return {
         statusCode: 400,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+        },
         body: JSON.stringify({ 
           mode: 'nodata', 
           reason: 'missing_message',
@@ -115,7 +151,8 @@ const handler: Handler = async (event) => {
         headers: {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': 'Content-Type'
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
         },
         body: JSON.stringify({
           mode: 'nodata',
@@ -179,6 +216,12 @@ const handler: Handler = async (event) => {
     if (!groundingData) {
       return {
         statusCode: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+        },
         body: JSON.stringify({
           mode: 'abstain',
           text: 'I don\'t have the data you\'re looking for right now.',
@@ -276,7 +319,8 @@ BIGQUERY DATA:\n${resultsText}`;
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type'
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
       },
       body: JSON.stringify({
         text: responseText,
@@ -301,6 +345,12 @@ BIGQUERY DATA:\n${resultsText}`;
     // Return structured error response with nodata mode
     return {
       statusCode: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+      },
       body: JSON.stringify({ 
         mode: 'nodata',
         reason: 'server_error',
