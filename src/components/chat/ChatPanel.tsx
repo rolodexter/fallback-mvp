@@ -548,7 +548,17 @@ const ChatPanel: React.FC = () => {
             .map((msg) => (
             <div key={msg.id} className={`chat-message ${msg.type}-message`}>
               <div className="message-content">
-                {msg.widget ? <WidgetRenderer widget={msg.widget} /> : msg.text}
+                {msg.widget
+                  ? (Array.isArray(msg.widget)
+                      ? (
+                          <>
+                            {msg.widget.map((w: any, idx: number) => (
+                              <WidgetRenderer key={idx} widget={w} />
+                            ))}
+                          </>
+                        )
+                      : <WidgetRenderer widget={msg.widget} />)
+                  : msg.text}
               </div>
               <div className="message-actions">
                 {msg.widget ? (
