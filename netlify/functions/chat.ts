@@ -28,12 +28,16 @@ type ChatRequest = {
 const handler: Handler = async (event) => {
   console.log('Netlify function called:', event.httpMethod, event.path);
   
-  // Check which data mode we're in (mock or live)
-  const dataMode: DataMode = (process.env.DATA_MODE === 'mock' ? 'mock' : 'live');
-  console.log(`[Netlify] Using data mode: ${dataMode}`);
+  // Check which data mode we're in (mock or live). Default to mock for Stage-A.
+  const dataMode: DataMode = (String(process.env.DATA_MODE || 'mock') === 'mock' ? 'mock' : 'live');
+  const polishing = String(process.env.POLISH_NARRATIVE || 'false').toLowerCase() === 'true';
+  console.log(`[Netlify] Using data mode: ${dataMode} | polishing=${polishing}`);
   
-  // Check for required environment variables
-  const requiredEnvVars = ['PROVIDER', 'PERPLEXITY_API_KEY'];
+  // Check for required environment variables (relaxed in mock unless polishing)
+  const requiredEnvVars: string[] = [];
+  if (dataMode === 'live' || polishing) {
+    requiredEnvVars.push('PROVIDER', 'PERPLEXITY_API_KEY');
+  }
   if (dataMode === 'live') {
     requiredEnvVars.push('GOOGLE_APPLICATION_CREDENTIALS');
   }
@@ -47,14 +51,18 @@ const handler: Handler = async (event) => {
         mode: 'nodata',
         reason: 'missing_env',
         text: 'Service unavailable due to missing environment configuration.',
-        details: `Missing environment variables: ${missingVars.join(', ')}` 
+        details: `Missing environment variables: ${missingVars.join(', ')}`,
+        provenance: {
+          platform: 'netlify',
+          fn_dir: 'netlify/functions'
+        }
       })
     };
   }
 
-  // Validate provider value
+  // Validate provider only when required
   const provider = process.env.PROVIDER;
-  if (provider !== 'perplexity') {
+  if ((dataMode === 'live' || polishing) && provider !== 'perplexity') {
     console.error(`[ERROR] Unsupported provider: ${provider}`);
     return {
       statusCode: 503,
@@ -62,7 +70,11 @@ const handler: Handler = async (event) => {
         mode: 'nodata',
         reason: 'invalid_provider',
         text: 'Service unavailable due to provider configuration issues.',
-        details: `Unsupported provider: ${provider}`
+        details: `Unsupported provider: ${provider}`,
+        provenance: {
+          platform: 'netlify',
+          fn_dir: 'netlify/functions'
+        }
       })
     };
   }
@@ -113,6 +125,10 @@ const handler: Handler = async (event) => {
             domain: null,
             confidence: routeResult.confidence || 0,
             groundingType: null
+          },
+          provenance: {
+            platform: 'netlify',
+            fn_dir: 'netlify/functions'
           }
         })
       };
@@ -174,7 +190,9 @@ const handler: Handler = async (event) => {
           },
           provenance: {
             source: dataMode,
-            template_id: domainTemplate
+            template_id: domainTemplate,
+            platform: 'netlify',
+            fn_dir: 'netlify/functions'
           }
         })
       };
@@ -271,7 +289,9 @@ BIGQUERY DATA:\n${resultsText}`;
         },
         provenance: {
           template_id: domainTemplate,
-          source: dataMode
+          source: dataMode,
+          platform: 'netlify',
+          fn_dir: 'netlify/functions'
         }
       })
     };
@@ -285,7 +305,11 @@ BIGQUERY DATA:\n${resultsText}`;
         mode: 'nodata',
         reason: 'server_error',
         text: 'Service unavailable. Please try again later.',
-        details: error instanceof Error ? error.message : 'Unknown error'
+        details: error instanceof Error ? error.message : 'Unknown error',
+        provenance: {
+          platform: 'netlify',
+          fn_dir: 'netlify/functions'
+        }
       })
     };
   }
