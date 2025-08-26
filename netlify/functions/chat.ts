@@ -26,6 +26,27 @@ function isListOnly(widgets: unknown): boolean {
   return arr.every(isListWidget);
 }
 
+// Helper: compute last 12 complete months [from, to] as YYYY-MM strings
+function last12CompleteMonths(): { from: string; to: string } {
+  const end = new Date();
+  // Move to first day of current month, then step back 1 to get last complete month
+  end.setUTCDate(1);
+  end.setUTCMonth(end.getUTCMonth() - 1);
+  const to = `${end.getUTCFullYear()}-${String(end.getUTCMonth() + 1).padStart(2, '0')}`;
+  const start = new Date(end);
+  start.setUTCMonth(start.getUTCMonth() - 11);
+  const from = `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, '0')}`;
+  return { from, to };
+}
+
+// Static BU chips for clarify (can be replaced with dynamic list later)
+const STATIC_BU_CHIPS = [
+  { id: 'ALL', label: 'All BUs' },
+  { id: 'Z001', label: 'Z001 — Liferafts' },
+  { id: 'Z002', label: 'Z002' },
+  { id: 'Z003', label: 'Z003' },
+];
+
 type ChatRequest = {
   message: string;
   history: Array<{role: "user" | "assistant", content: string}>;
@@ -214,8 +235,70 @@ const handler: Handler = async (event) => {
     // Carry detail knob from hints if provided (client may bump on follow-ups)
     const detail: number | undefined = (typeof clientHints?.prevDetail === 'number') ? clientHints.prevDetail as number : undefined;
 
+    // Slot-fill/Clarify: enforce period defaults and reuse/clarify unit for metric timeseries
+    const isTimeseries = (typeof ((templateIdFromBody as string) || det.template_id) === 'string')
+      ? (((templateIdFromBody as string) || det.template_id) === 'metric_timeseries_v1')
+      : (domainTemplate === 'metric_timeseries_v1');
+    if (isTimeseries) {
+      // Period default: only when none provided
+      if (!params.from && !params.to && !params.year && !params.time_window) {
+        const { from, to } = last12CompleteMonths();
+        params.from = from;
+        params.to = to;
+        if (!params.granularity) params.granularity = 'month';
+        // Track defaults for transparency later in meta
+        // defaults_used is declared below; accumulate here and will be spread into meta
+      }
+
+      // Unit handling: reuse previous if present; otherwise clarify
+      if (!params.unit) {
+        const prevUnit = clientHints?.prevParams?.unit as string | undefined;
+        if (prevUnit) {
+          params.unit = String(prevUnit).toUpperCase();
+        } else {
+          // Early clarify response; no red banner, 200 OK
+          return {
+            statusCode: 200,
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+              'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+              'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+            },
+            body: JSON.stringify({
+              mode: 'clarify',
+              text: 'Which business unit should I use for the monthly gross trend?',
+              clarify: {
+                missing: ['unit'],
+                suggestions: { unit: STATIC_BU_CHIPS }
+              },
+              meta: {
+                domain: det.domain || (routeResult.domain || ''),
+                confidence: (typeof routeResult.confidence === 'number' ? routeResult.confidence : 0.9),
+                groundingType: 'clarify',
+                // Hint that we defaulted period silently
+                defaults_used: (!params.from && !params.to) ? undefined : { period: 'last_12m' }
+              },
+              provenance: {
+                tag: 'CLARIFY_REQUIRED',
+                domain: det.domain,
+                template: 'metric_timeseries_v1',
+                state: { params }
+              }
+            })
+          };
+        }
+      }
+    }
+
     // Slot-fill safe defaults (example: latest complete year when template implies year granularity)
     const defaults_used: Record<string, any> = {};
+    // If we filled timeseries from/to above, record it here for transparency
+    if (params && params.from && params.to && !('period' in defaults_used)) {
+      // Heuristic: if the caller didn't explicitly pass from/to in body or det, consider it a default
+      // We cannot perfectly detect origin here; still useful for UX
+      defaults_used.period = defaults_used.period || 'last_12m';
+    }
     const now = new Date();
     const latestCompleteYear = now.getFullYear() - 1;
     if (params && typeof params.year === 'undefined' && typeof domainTemplate === 'string' && /_year_/.test(domainTemplate)) {
