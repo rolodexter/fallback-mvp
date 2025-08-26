@@ -6,6 +6,7 @@ import { routeMessage as topicRouteMessage } from '../../src/data/router/topicRo
 import { runTemplate } from '../../src/data/templates';
 import { rewriteMessage } from '../../src/services/semanticRewrite';
 import { unitLabel } from '../../src/data/labels';
+import { enrichBusinessUnitData, synthesizeBuImportanceResponse } from '../../src/services/buEnrichment';
 
 // Broad greeting/help detector used for server-side fallback
 const GREET_RE = /\b(hi|hello|hey|yo|howdy|greetings|good\s+(morning|afternoon|evening)|help|start|get(ting)?\s+started|what\s+can\s+you\s+do)\b/i;
@@ -573,6 +574,33 @@ const handler: Handler = async (event) => {
 
         // Labelize list widgets coming from templates (exec-friendly)
         const labeledWidgets = labelizeWidgets(templateData.templateOutput?.widgets);
+
+        // Handle business unit importance ranking with enrichment
+        if (domainTemplate === 'business_units_ranking_v1' && templateData.templateOutput) {
+          try {
+            console.log('[Netlify] Enriching business unit importance data with context');
+            const buData = templateData.templateOutput.data;
+            const metric = params.metric || 'revenue';
+            
+            if (buData && Array.isArray(buData) && buData.length > 0) {
+              // Enrich business unit data with contextual information
+              const enrichedData = await enrichBusinessUnitData(buData, metric);
+              
+              // Synthesize natural language response
+              const synthesizedResponse = await synthesizeBuImportanceResponse(enrichedData, metric);
+              
+              // Update template output with enriched data and response
+              templateData.templateOutput.data = enrichedData;
+              templateData.templateOutput.text = synthesizedResponse;
+              templateData.templateOutput.context_enriched = true;
+              
+              console.log('[Netlify] Successfully enriched business unit importance data');
+            }
+          } catch (enrichErr) {
+            console.error('[ERROR] Failed to enrich business unit data:', enrichErr);
+            // Continue with original template data if enrichment fails
+          }
+        }
 
         groundingData = {
           domain: det.domain || (routeResult.domain || ''),

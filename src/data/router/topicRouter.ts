@@ -196,6 +196,24 @@ export function routeMessage(msg: string): RouteHit {
     return { domain: "metrics", template_id: "metric_breakdown_by_unit_v1", params };
   }
   
+  // Business units ranking by importance (top/largest/most important/best performing)
+  const BU_RANK_PAT = /\b(most\s+important|top|best|largest|biggest|highest|main|primary|key|critical|strategic|valuable)\b/i;
+  const BU_SUBJECT_PAT = /\b(business\s+units?|division|bu|bus|lob)s?\b/i;
+  
+  if (BU_RANK_PAT.test(m) && BU_SUBJECT_PAT.test(m)) {
+    const sortMetric = m.includes('profit') || m.includes('margin') ? 'gross' : 'revenue';
+    return { 
+      domain: "business_units", 
+      template_id: "business_units_ranking_v1", 
+      params: { 
+        metric: sortMetric,
+        limit: 3, // Show top 3 by default
+        year: new Date().getFullYear() - 1,
+        showDetails: true
+      } 
+    };
+  }
+
   // Business units list (broad phrasing): business units / divisions / lines of business / LOB
   const BU_LIST_PAT = /\b(business\s+units?|divisions?|lines?\s+of\s+business|lob?s?)\b/i;
   if (BU_LIST_PAT.test(m)) {
