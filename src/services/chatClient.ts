@@ -268,7 +268,7 @@ export type ChatPayload = {
   template?: { id?: string };
   params?:   Record<string, any>;
   endpoint?: string;
-  // Optional prior turns so the server can understand follow-ups in live mode
+  // Optional prior turns so the server can understand follow-ups
   history?: ChatHistoryItem[];
   // Optional client hints for servers that support soft context reuse
   client_hints?: {
@@ -276,6 +276,7 @@ export type ChatPayload = {
     prevTemplate?: string | null;
     prevParams?: Record<string, unknown> | null;
     prevTop?: number | null;
+    prevDetail?: number | null;
   };
 };
 
@@ -293,6 +294,7 @@ export type Answer = {
     tag?: string; // e.g., IMPORT_*_FAIL, CHAT_RUNTIME
     error?: string;
     params?: Record<string, any>;
+    state?: { params?: Record<string, any>; detail?: number };
   };
   // Optional reasons for abstain/nodata
   reason?: string;
