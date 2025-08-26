@@ -18,16 +18,16 @@ function getPageSize(): number {
   return 8; // Default page size
 }
 
-// Set dataMode as a const to ensure it's used
-const dataMode: DataMode = (() => {
+// Normalize data mode and replace RAW_MODE in the file
+function getDataMode(): DataMode {
   // Read from env first
   const raw = String(process.env.DATA_MODE || '').toLowerCase();
   if (raw === 'bq' || raw === 'live') return 'live';
   // Default to mock if not explicitly set
   return 'mock';
-})();
+}
 
-// Helper: labelize a BU code as "Z001 — Liferafts" if known
+// Helper used for chip creation when we need individual codes
 function labelizeUnitCode(code: string): string {
   const lbl = unitLabel(code);
   return lbl && lbl !== code ? `${code} — ${lbl}` : code;
@@ -86,9 +86,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
   }
   const userMessage = String((body?.message ?? (request.query as any)?.message ?? ''));
 
-  // 2) Normalize data mode ('bq' -> 'live')
-  const RAW_MODE = String(process.env.DATA_MODE ?? 'mock').toLowerCase();
-  const DATA_MODE: DataMode = RAW_MODE === 'bq' ? 'live' : (RAW_MODE === 'live' ? 'live' : 'mock');
+  // 2) getDataMode() used throughout for consistent mode handling
 
   // If no message, return a friendly diagnostic instead of 405/400
   if (!userMessage) {
@@ -171,7 +169,6 @@ export default async function handler(request: VercelRequest, response: VercelRe
   // 6) Execute template with full guard
   try {
     // Check for missing params that need clarification
-    const params = route.params ?? {};
     const clarifyData: any = {};
     
     // Special case: if we need a unit param but don't have it,
@@ -180,7 +177,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
         (route.params?.unit === undefined || route.params?.unit === null)) {
       try {
         // Dynamic BU list fetch for clarify chips
-        const buList = await runTemplate('business_units_list_v1', { limit: getPageSize() }, DATA_MODE);
+        const buList = await runTemplate('business_units_list_v1', { limit: getPageSize() }, getDataMode());
         
         if (buList?.widgets?.[0]?.items?.length) {
           // Build chips from the list items
@@ -248,7 +245,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
     }
     
     // Run the template with params
-    const tpl = await runTemplate(route.template_id, route.params ?? {}, DATA_MODE);
+    const tpl = await runTemplate(route.template_id, route.params ?? {}, getDataMode());
 
     // Normalize output: prefer nested templateOutput fields if present
     const out = (tpl as any)?.templateOutput;
@@ -274,10 +271,12 @@ export default async function handler(request: VercelRequest, response: VercelRe
       meta: {
         domain: route?.domain ?? null,
         confidence: typeof route?.confidence === 'number' ? route.confidence : 1,
-        groundingType: rewriteApplied ? 'llm_rewrite' : 'drilldown'
+        groundingType: rewriteApplied ? 'llm_rewrite' : 'drilldown',
+        coverage: tpl?.meta?.coverage || null,
+        paging: tpl?.meta?.paging || null
       },
       provenance: {
-        source: RAW_MODE === 'bq' ? 'bq' : (RAW_MODE === 'live' ? 'live' : 'mock'),
+        source: getDataMode(),
         tag: 'TEMPLATE_RUN',
         template_id: route.template_id,
         domain: route.domain,
