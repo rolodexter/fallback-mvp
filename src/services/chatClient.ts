@@ -57,6 +57,19 @@ if (typeof window !== 'undefined') {
   window.__riskillDebug = window.__riskillDebug || { endpoint: '', platform: '' };
 }
 
+// Prefer an absolute API base when provided (e.g., Windsurf static -> Netlify API)
+// Read at build time from Vite; fallback to runtime global if injected
+const API_BASE: string =
+  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE) ||
+  (typeof window !== 'undefined' && (window as any).VITE_API_BASE) ||
+  '';
+
+const join = (base: string, path: string) => {
+  if (!base) return path;
+  const b = base.endsWith('/') ? base.slice(0, -1) : base;
+  return `${b}${path}`;
+};
+
 /**
  * Verify that chat client is properly configured for production use
  * @returns {Object} Verification result with success and issues
@@ -159,6 +172,25 @@ export const chatClient = {
       };
     }
     
+    // If API_BASE is provided, use it directly (ideal for Windsurf static frontends)
+    if (API_BASE) {
+      this.endpoint = join(API_BASE, '/api/chat');
+      window.__riskillDebug.endpoint = this.endpoint;
+      window.__riskillDebug.platform = 'external';
+      const initResult = {
+        success: true,
+        platform: 'external',
+        endpoint: this.endpoint,
+        message: 'Initialized from VITE_API_BASE',
+        diagnostics: {} as Record<string, any>
+      };
+      this.initialized = true;
+      // Store initialization time for runtime verification
+      window.__riskillDebug.initTime = new Date().toISOString();
+      window.__riskillDebug.initSource = initResult.message;
+      return initResult;
+    }
+
     const deployPlatform = import.meta?.env?.VITE_DEPLOY_PLATFORM;
     const initResult: {
       success: boolean;
@@ -282,8 +314,13 @@ export type Answer = {
 };
 
 export async function sendChat(p: ChatPayload): Promise<Answer> {
-  const endpoint = p.endpoint ||
-    (import.meta.env.VITE_DEPLOY_PLATFORM === 'netlify' ? '/.netlify/functions/chat' : '/api/chat');
+  // Prefer absolute API base when available; fallback to platform-relative paths
+  const endpoint = p.endpoint
+    || (chatClient.initialized && chatClient.endpoint)
+    || (API_BASE ? join(API_BASE, '/api/chat')
+                 : (import.meta.env.VITE_DEPLOY_PLATFORM === 'netlify'
+                    ? '/.netlify/functions/chat'
+                    : '/api/chat'));
   const body = {
     message: p.message,
     router:   { domain: p.router?.domain },
