@@ -24,33 +24,10 @@ export type GroundingPayload = {
   bigQueryData?: any[] | null;
 };
 
-// Debug info container for development purposes
-declare global {
-  interface Window {
-    __riskillDebug: {
-      endpoint: string;
-      platform: string;
-      mswActive?: boolean;
-      mswError?: string;
-      routerDomain?: string;
-      routerConfidence?: number;
-      routerGroundingType?: string;
-      groundingType?: string;
-      templateId?: string;
-      responseDomain?: string;
-      responseGroundingType?: string;
-      responseConfidence?: number;
-      lastRequestTime?: string;
-      lastRequestEndpoint?: string;
-      lastResponseTime?: string;
-      lastResponseStatus?: number;
-      lastError?: string;
-      errors?: string[];
-      initTime?: string;
-      initSource?: string;
-    };
-  }
-}
+// Short chat history item for live/LLM to understand follow-ups
+export type ChatHistoryItem = { role: 'user' | 'assistant'; content: string };
+
+// Debug info container for development purposes is declared in src/types/globals.d.ts
 
 // Initialize debug container
 if (typeof window !== 'undefined') {
@@ -290,7 +267,14 @@ export type ChatPayload = {
   params?:   Record<string, any>;
   endpoint?: string;
   // Optional prior turns so the server can understand follow-ups in live mode
-  history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  history?: ChatHistoryItem[];
+  // Optional client hints for servers that support soft context reuse
+  client_hints?: {
+    prevDomain?: string | null;
+    prevTemplate?: string | null;
+    prevParams?: Record<string, unknown> | null;
+    prevTop?: number | null;
+  };
 };
 
 export type Answer = {
@@ -328,7 +312,8 @@ export async function sendChat(p: ChatPayload): Promise<Answer> {
     router:   { domain: p.router?.domain },
     template: { id: p.template?.id },
     params:   p.params ?? {},
-    history:  p.history ?? []
+    history:  p.history ?? [],
+    client_hints: p.client_hints
   };
   console.info('[SUBMIT]', { body, endpoint });
   const res = await fetch(endpoint, {

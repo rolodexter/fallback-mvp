@@ -112,6 +112,9 @@ type ChatHistoryEntry = {
   role: 'user' | 'assistant';
   content: string;
 };
+ 
+ // Short, common follow-ups that lack domain cues
+ const FOLLOWUP_RE = /^(tell me more|continue|more details?|details|expand|what else|go on|show more|drill ?down|yes,? continue)\b/i;
 
 const ChatPanel: React.FC = () => {
   const [message, setMessage] = useState('');
@@ -339,8 +342,12 @@ const ChatPanel: React.FC = () => {
     // Step 1: Deterministic routing for canonical prompts (client hint only)
     const r = routeMessage(message);
     console.info('[ROUTE]', r);
-    // Apply current deterministic route if present, otherwise fall back to last successful route
-    const applied = (r && r.domain && r.template_id) ? r : (lastRouteRef.current || {});
+    // Apply current deterministic route if present; otherwise reuse last successful route only for follow-ups
+    const looksLikeFollowup = FOLLOWUP_RE.test(message);
+    let applied: any = (r && r.domain && r.template_id) ? r : undefined;
+    if (!applied && looksLikeFollowup && lastRouteRef.current) {
+      applied = lastRouteRef.current;
+    }
     if (applied && applied.domain && applied.template_id) {
       setDomain(applied.domain);
       setTemplateId(applied.template_id);
@@ -353,13 +360,20 @@ const ChatPanel: React.FC = () => {
 
     try {
       // Stage-A payload typing for compile-time safety
+      const client_hints = lastRouteRef.current ? {
+        prevDomain: lastRouteRef.current.domain ?? null,
+        prevTemplate: lastRouteRef.current.template_id ?? null,
+        prevParams: lastRouteRef.current.params ?? null,
+        prevTop: (typeof (lastRouteRef.current.params?.top) === 'number') ? lastRouteRef.current.params.top : null
+      } : undefined;
       const payload: ChatPayload = {
         message,
         router: { domain: (applied as any)?.domain },
         template: { id: (applied as any)?.template_id },
         params: (applied as any)?.params || {},
         endpoint,
-        history: historyToSend
+        history: historyToSend,
+        client_hints
       };
 
       const answer: Answer = await sendChat(payload);
