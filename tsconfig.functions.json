@@ -8,7 +8,7 @@
     "lib": ["ES2022", "DOM"],
     "importsNotUsedAsValues": "remove"
   },
-  "include": ["api", "src/data"],
+  "include": ["api", "src/data", "src/services"],
   "exclude": [
     "netlify/**",
     "src/data/templates/registry.ts"

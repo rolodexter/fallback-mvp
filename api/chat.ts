@@ -93,7 +93,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
     return response.status(200).json({
       mode: 'abstain',
       text: 'No deterministic grounding available (Stage-A).',
-      provenance: { source: 'mock', tag: 'NO_GROUNDING', router_debug: route }
+      provenance: { source: 'mock', tag: 'NO_GROUNDING', router_debug: route, ...(rewriteInfo ? { rewriteInfo } : {}) }
     });
   }
 
