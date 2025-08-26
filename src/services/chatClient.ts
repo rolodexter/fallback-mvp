@@ -262,7 +262,7 @@ export const chatClient = {
 // Minimal Stage-A types and sender
 export type ChatPayload = {
   message: string;
-  router?:   { domain?: string };
+  router?:   { domain?: string; template_id?: string; params?: Record<string, unknown> };
   template?: { id?: string };
   params?:   Record<string, any>;
   endpoint?: string;
@@ -309,7 +309,7 @@ export async function sendChat(p: ChatPayload): Promise<Answer> {
                     : '/api/chat'));
   const body = {
     message: p.message,
-    router:   { domain: p.router?.domain },
+    router:   p.router ?? undefined,
     template: { id: p.template?.id },
     params:   p.params ?? {},
     history:  p.history ?? [],

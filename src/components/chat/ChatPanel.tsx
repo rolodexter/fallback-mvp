@@ -330,8 +330,12 @@ const ChatPanel: React.FC = () => {
     setIsLoading(true);
     setMessage('');
     
-    // Prepare chat history to send with this turn (include this user message)
-    const historyToSend: ChatHistoryEntry[] = [...chatHistory, { role: 'user', content: message }];
+    // Prepare chat history to send with this turn (cap to last 8, sanitize)
+    const capped = chatHistory.slice(-8);
+    const historyToSend: ChatHistoryEntry[] = [
+      ...capped.map(h => ({ role: h.role, content: String(h.content ?? '').trim() })),
+      { role: 'user', content: String(message).trim() }
+    ];
     setChatHistory(historyToSend);
 
     // Determine the endpoint based on platform
@@ -344,7 +348,8 @@ const ChatPanel: React.FC = () => {
     console.info('[ROUTE]', r);
     // Apply current deterministic route if present; otherwise reuse last successful route only for follow-ups
     const looksLikeFollowup = FOLLOWUP_RE.test(message);
-    let applied: any = (r && r.domain && r.template_id) ? r : undefined;
+    const routedTemplateId = (r as any)?.template_id ?? (r as any)?.template;
+    let applied: any = (r && r.domain && routedTemplateId) ? { ...r, template_id: routedTemplateId } : undefined;
     if (!applied && looksLikeFollowup && lastRouteRef.current) {
       applied = lastRouteRef.current;
     }
@@ -368,7 +373,11 @@ const ChatPanel: React.FC = () => {
       } : undefined;
       const payload: ChatPayload = {
         message,
-        router: { domain: (applied as any)?.domain },
+        router: applied && applied.domain && applied.template_id ? {
+          domain: applied.domain,
+          template_id: applied.template_id,
+          params: (applied.params ?? {})
+        } : undefined,
         template: { id: (applied as any)?.template_id },
         params: (applied as any)?.params || {},
         endpoint,
@@ -379,6 +388,16 @@ const ChatPanel: React.FC = () => {
       const answer: Answer = await sendChat(payload);
       console.info('[ANSWER]', answer);
       renderAnswer(answer);
+      // Refresh lastRouteRef from server echo if available
+      const srvDomain = answer?.meta?.domain;
+      const srvTemplateId = (answer?.provenance as any)?.template_id;
+      if (srvDomain && srvTemplateId) {
+        lastRouteRef.current = {
+          domain: srvDomain,
+          template_id: srvTemplateId,
+          params: (applied as any)?.params ?? {}
+        };
+      }
     } catch (error) {
       // Handle error in the response
       console.error('[ChatPanel] Error:', error);
