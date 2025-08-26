@@ -6,6 +6,27 @@ export const config = { runtime: 'nodejs' };
 
 type DataMode = 'mock' | 'live';
 
+// Helper to get page size for pagination
+function getPageSize(): number {
+  try {
+    const envLimit = process.env.BU_LIST_LIMIT;
+    if (envLimit) {
+      const parsed = parseInt(envLimit, 10);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+  } catch {}
+  return 8; // Default page size
+}
+
+// Set dataMode as a const to ensure it's used
+const dataMode: DataMode = (() => {
+  // Read from env first
+  const raw = String(process.env.DATA_MODE || '').toLowerCase();
+  if (raw === 'bq' || raw === 'live') return 'live';
+  // Default to mock if not explicitly set
+  return 'mock';
+})();
+
 // Helper: labelize a BU code as "Z001 — Liferafts" if known
 function labelizeUnitCode(code: string): string {
   const lbl = unitLabel(code);
@@ -149,6 +170,84 @@ export default async function handler(request: VercelRequest, response: VercelRe
 
   // 6) Execute template with full guard
   try {
+    // Check for missing params that need clarification
+    const params = route.params ?? {};
+    const clarifyData: any = {};
+    
+    // Special case: if we need a unit param but don't have it,
+    // pull the BU list to populate clarify chips
+    if (route.template_id !== 'business_units_list_v1' && 
+        (route.params?.unit === undefined || route.params?.unit === null)) {
+      try {
+        // Dynamic BU list fetch for clarify chips
+        const buList = await runTemplate('business_units_list_v1', { limit: getPageSize() }, DATA_MODE);
+        
+        if (buList?.widgets?.[0]?.items?.length) {
+          // Build chips from the list items
+          const chips = [
+            { id: 'ALL', label: 'All BUs', params: {} },
+            ...(buList.widgets[0].items.map((item: string) => {
+              const parts = item.split(' — ');
+              const id = parts[0];
+              return {
+                id,
+                label: item,
+                params: { unit: id }
+              };
+            }))
+          ];
+          
+          // Add 'Show more' chip if pagination is available
+          if (buList?.meta?.paging?.next_page_token) {
+            chips.push({
+              id: 'MORE',
+              label: 'Show more',
+              params: { page_token: buList.meta.paging.next_page_token }
+            });
+          }
+          
+          // Build a nice clarify prompt with coverage info
+          let prompt = 'Which business unit are you interested in?';
+          if (buList?.meta?.coverage) {
+            const { shown, total } = buList.meta.coverage;
+            prompt = `Which business unit are you interested in? ${shown} of ${total} BUs shown.`;
+          }
+          
+          clarifyData.unit = {
+            param: 'unit',
+            prompt,
+            chips
+          };
+        }
+      } catch (e) {
+        // Fallback to defaults
+        const DEFAULT_BU_CHIPS = [
+          { id: 'Z001', label: 'Z001 — Liferafts', params: { unit: 'Z001' } },
+          { id: 'Z002', label: 'Z002 — Safety', params: { unit: 'Z002' } },
+          { id: 'Z003', label: 'Z003 — Navigation', params: { unit: 'Z003' } },
+          { id: 'ALL', label: 'All BUs', params: {} }
+        ];
+        
+        clarifyData.unit = {
+          param: 'unit',
+          prompt: 'Which business unit would you like to see?',
+          chips: DEFAULT_BU_CHIPS
+        };
+      }
+      
+      // If we have clarify data, return it now
+      if (Object.keys(clarifyData).length > 0) {
+        return response.status(200).json({
+          mode: 'clarify',
+          text: clarifyData[Object.keys(clarifyData)[0]].prompt,
+          clarify: clarifyData,
+          meta: { groundingType: rewriteApplied ? 'llm_rewrite' : 'clarify' },
+          provenance: { source: 'router', tag: 'CLARIFY_PROMPT' }
+        });
+      }
+    }
+    
+    // Run the template with params
     const tpl = await runTemplate(route.template_id, route.params ?? {}, DATA_MODE);
 
     // Normalize output: prefer nested templateOutput fields if present

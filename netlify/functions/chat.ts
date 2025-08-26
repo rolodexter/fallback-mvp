@@ -16,6 +16,28 @@ type DataMode = 'mock' | 'live';
 // No dotenv in serverless functions; rely on platform env
 
 // Helpers to detect list widgets robustly (supports `type` or `kind`)
+// Set dataMode as a const to ensure it's used
+const dataMode: DataMode = (() => {
+  // Read from env first
+  const raw = String(process.env.DATA_MODE || '').toLowerCase();
+  if (raw === 'bq' || raw === 'live') return 'live';
+  // Default to mock if not explicitly set
+  return 'mock';
+})();
+
+// Helper to get page size for pagination
+function getPageSize(): number {
+  try {
+    const envLimit = process.env.BU_LIST_LIMIT;
+    if (envLimit) {
+      const parsed = parseInt(envLimit, 10);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+  } catch {}
+  return 8; // Default page size if not specified
+}
+
+// Helpers to detect list widgets robustly (supports `type` or `kind`)
 function isListWidget(w: any): boolean {
   const t = String((w?.type ?? w?.kind ?? '')).toLowerCase();
   return t === 'list';
@@ -40,13 +62,16 @@ function last12CompleteMonths(): { from: string; to: string } {
   return { from, to };
 }
 
-// Static BU chips for clarify (can be replaced with dynamic list later)
-const STATIC_BU_CHIPS = [
+// We'll fetch BU chips dynamically when possible
+const DEFAULT_BU_CHIPS = [
   { id: 'ALL', label: 'All BUs' },
   { id: 'Z001' },
   { id: 'Z002' },
   { id: 'Z003' },
 ];
+
+// Special chip types (defined inline where used)
+// Removed SHOW_MORE_CHIP and SHOW_ALL_CHIP as they're not needed as constants
 
 // Helper: labelize a BU code as "Z001 — Liferafts" if known
 function labelizeUnitCode(code: string): string {
@@ -292,6 +317,65 @@ const handler: Handler = async (event) => {
         if (prevUnit) {
           params.unit = String(prevUnit).toUpperCase();
         } else {
+          // Try to get BU list for better clarify chips
+          let buChips: Array<{id: string, label: string, action?: string, params?: Record<string, any>}> = [];
+          let coverageInfo: any = null;
+          let pageToken: string | undefined;
+          
+          try {
+            // Get first page of BU list for clarify
+            const buListTemplate = await runTemplate('business_units_list_v1', { limit: getPageSize() }, dataMode);
+            
+            // Extract units from the list widget
+            const buListWidgets = buListTemplate?.templateOutput?.widgets;
+            if (buListWidgets?.type === 'list' && Array.isArray(buListWidgets.items)) {
+              // Extract coverage info
+              coverageInfo = buListTemplate?.meta?.coverage || null;
+              
+              // Get paging token if available
+              pageToken = buListTemplate?.paging?.next_page_token;
+              
+              // Map BU codes to clarify chips
+              buChips = buListWidgets.items.map((id: string) => {
+                // Extract just the code part if it has a label already
+                const code = String(id).split(' — ')[0].trim();
+                return {
+                  id: code,
+                  label: id.includes(' — ') ? id : labelizeUnitCode(code)
+                };
+              });
+              
+              // Insert "ALL" option at the top
+              buChips.unshift({ id: 'ALL', label: 'All BUs' });
+              
+              // Add "Show more" chip if there are more pages
+              if (pageToken) {
+                buChips.push({ 
+                  id: 'SHOW_MORE',
+                  label: 'Show more',
+                  action: 'more',
+                  params: { page_token: pageToken }
+                });
+              }
+            }
+          } catch (err) {
+            console.warn('Failed to get BU list for clarify, using defaults:', err);
+          }
+          
+          // Fall back to default chips if BU list failed
+          if (buChips.length === 0) {
+            buChips = DEFAULT_BU_CHIPS.map(chip => ({
+              id: chip.id,
+              label: chip.id === 'ALL' ? 'All BUs' : labelizeUnitCode(chip.id as string)
+            }));
+          }
+          
+          // Build clarify text with coverage information if available
+          let clarifyText = 'Which business unit should I use for the monthly gross trend?';
+          if (coverageInfo) {
+            clarifyText += ` Found ${coverageInfo.total} business units; showing ${coverageInfo.shown}.`;
+          }
+          
           // Early clarify response; no red banner, 200 OK
           return {
             statusCode: 200,
@@ -303,20 +387,16 @@ const handler: Handler = async (event) => {
             },
             body: JSON.stringify({
               mode: 'clarify',
-              text: 'Which business unit should I use for the monthly gross trend?',
+              text: clarifyText,
               clarify: {
                 missing: ['unit'],
-                suggestions: {
-                  unit: STATIC_BU_CHIPS.map(chip => ({
-                    id: chip.id,
-                    label: chip.id === 'ALL' ? 'All BUs' : labelizeUnitCode(chip.id as string)
-                  }))
-                }
+                suggestions: { unit: buChips }
               },
               meta: {
                 domain: det.domain || (routeResult.domain || ''),
                 confidence: (typeof routeResult.confidence === 'number' ? routeResult.confidence : 0.9),
                 groundingType: 'clarify',
+                coverage: coverageInfo,
                 // Hint that we defaulted period silently
                 defaults_used: (!params.from && !params.to) ? undefined : { period: 'last_12m' }
               },

@@ -74,16 +74,42 @@ const WidgetRail: React.FC<{ domain?: string; loading?: boolean }> = ({ domain, 
 // Exec-friendly widget renderer and numeric formatting
 const nf = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 
-const WidgetRenderer: React.FC<{ widget: any }> = ({ widget }) => {
+// Type definitions for coverage data
+type CoverageInfo = {
+  shown: number;      // How many items are being shown
+  total: number;      // Total number of items available
+  dataset?: string;   // Source dataset
+  location?: string;  // Data location
+  facts_count?: number; // Number of items in facts table
+};
+
+const WidgetRenderer: React.FC<{ widget: any, meta?: { coverage?: CoverageInfo } }> = ({ widget, meta }) => {
   if (!widget) return null;
   // List widget: render as bullet list
   if (widget.type === 'list' && Array.isArray(widget.items)) {
     return (
-      <ul className="widget-list">
-        {widget.items.map((it: string) => (
-          <li key={it} className="tabular-nums">{it}</li>
-        ))}
-      </ul>
+      <>
+        <ul className="widget-list">
+          {widget.items.map((it: string) => (
+            <li key={it} className="tabular-nums">{it}</li>
+          ))}
+        </ul>
+        {meta?.coverage && (
+          <div className="coverage-info">
+            <span className="text-sm text-gray-500">
+              Showing {meta.coverage.shown} of {meta.coverage.total} BUs
+              {meta.coverage.dataset && ` • Source: ${meta.coverage.dataset}`}
+              {meta.coverage.location && ` • ${meta.coverage.location}`}
+              {meta.coverage.shown < meta.coverage.total && (
+                <button className="text-blue-600 ml-2 underline"
+                  onClick={() => window.chatClient?.sendMessage("Show all business units")}>
+                  Show all
+                </button>
+              )}
+            </span>
+          </div>
+        )}
+      </>
     );
   }
   if (widget.type === 'table' && Array.isArray(widget.columns) && Array.isArray(widget.rows)) {
@@ -696,7 +722,7 @@ const ChatPanel: React.FC = () => {
                       ))}
                     </div>
                   ) : (
-                    <WidgetRenderer widget={msg.widget} />
+                    <WidgetRenderer widget={msg.widget} meta={lastAnswerRawRef.current?.meta} />
                   )
                 ) : (
                   msg.text
