@@ -5,6 +5,7 @@ import { routeMessage as domainRouteMessage } from '../../src/data/router/router
 import { routeMessage as topicRouteMessage } from '../../src/data/router/topicRouter';
 import { runTemplate } from '../../src/data/templates';
 import { rewriteMessage } from '../../src/services/semanticRewrite';
+import { unitLabel } from '../../src/data/labels';
 
 // Broad greeting/help detector used for server-side fallback
 const GREET_RE = /\b(hi|hello|hey|yo|howdy|greetings|good\s+(morning|afternoon|evening)|help|start|get(ting)?\s+started|what\s+can\s+you\s+do)\b/i;
@@ -42,10 +43,37 @@ function last12CompleteMonths(): { from: string; to: string } {
 // Static BU chips for clarify (can be replaced with dynamic list later)
 const STATIC_BU_CHIPS = [
   { id: 'ALL', label: 'All BUs' },
-  { id: 'Z001', label: 'Z001 — Liferafts' },
-  { id: 'Z002', label: 'Z002' },
-  { id: 'Z003', label: 'Z003' },
+  { id: 'Z001' },
+  { id: 'Z002' },
+  { id: 'Z003' },
 ];
+
+// Helper: labelize a BU code as "Z001 — Liferafts" if known
+function labelizeUnitCode(code: string): string {
+  const lbl = unitLabel(code);
+  return lbl && lbl !== code ? `${code} — ${lbl}` : code;
+}
+
+// Helper: deep labelize list widgets in-place (supports single or array)
+function labelizeWidgets(w: any): any {
+  if (!w) return w;
+  const apply = (one: any) => {
+    try {
+      const t = String((one?.type ?? one?.kind ?? '')).toLowerCase();
+      if (t === 'list' && Array.isArray(one.items)) {
+        one.items = one.items.map((it: any) => {
+          const s = String(it ?? '');
+          // Only transform plausible BU codes (e.g., Z001) when a label exists
+          const lbl = unitLabel(s);
+          return lbl && lbl !== s ? `${s} — ${lbl}` : s;
+        });
+      }
+    } catch {}
+    return one;
+  };
+  if (Array.isArray(w)) return w.map(apply);
+  return apply(w);
+}
 
 type ChatRequest = {
   message: string;
@@ -270,7 +298,12 @@ const handler: Handler = async (event) => {
               text: 'Which business unit should I use for the monthly gross trend?',
               clarify: {
                 missing: ['unit'],
-                suggestions: { unit: STATIC_BU_CHIPS }
+                suggestions: {
+                  unit: STATIC_BU_CHIPS.map(chip => ({
+                    id: chip.id,
+                    label: chip.id === 'ALL' ? 'All BUs' : labelizeUnitCode(chip.id as string)
+                  }))
+                }
               },
               meta: {
                 domain: det.domain || (routeResult.domain || ''),
@@ -341,12 +374,15 @@ const handler: Handler = async (event) => {
       try {
         console.info(`[Netlify] Generating grounding data for: ${domainTemplate}`);
         const templateData = await runTemplate(domainTemplate, params ?? null);
-        
+
+        // Labelize list widgets coming from templates (exec-friendly)
+        const labeledWidgets = labelizeWidgets(templateData.templateOutput?.widgets);
+
         groundingData = {
           domain: det.domain || (routeResult.domain || ''),
           confidence: (typeof routeResult.confidence === 'number' ? routeResult.confidence : 0.9),
           kpiSummary: templateData.kpiSummary || null,
-          templateOutput: templateData.templateOutput || null,
+          templateOutput: templateData.templateOutput ? { ...templateData.templateOutput, widgets: labeledWidgets ?? templateData.templateOutput.widgets } : null,
           groundingType: 'template'
         };
       } catch (err) {
@@ -360,12 +396,15 @@ const handler: Handler = async (event) => {
       try {
         console.info(`[Netlify] Generating grounding data (fallback) for: ${domainTemplate}`);
         const templateData = await runTemplate(domainTemplate, params ?? null);
-        
+
+        // Labelize list widgets coming from templates (exec-friendly)
+        const labeledWidgets = labelizeWidgets(templateData.templateOutput?.widgets);
+
         groundingData = {
           domain: det.domain || (routeResult.domain || ''),
           confidence: (typeof routeResult.confidence === 'number' ? routeResult.confidence : 0.9),
           kpiSummary: templateData.kpiSummary || null,
-          templateOutput: templateData.templateOutput || null,
+          templateOutput: templateData.templateOutput ? { ...templateData.templateOutput, widgets: labeledWidgets ?? templateData.templateOutput.widgets } : null,
           groundingType: 'drilldown',
           bigQueryData: null
         };
@@ -513,6 +552,9 @@ BIGQUERY DATA:\n${resultsText}`;
       }
     }
     
+    // Labelize widgets one last time if any slipped through
+    widgets = labelizeWidgets(widgets);
+
     // Prepare response
     return {
       statusCode: 200,
