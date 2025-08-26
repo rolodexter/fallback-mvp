@@ -174,6 +174,28 @@ export function routeMessage(msg: string): RouteHit {
     return { domain:"performance", template_id:"monthly_gross_trend_v1", params:{ window:"24m" } };
   }
 
+  // Metric breakdown by business unit
+  const BREAKDOWN_PAT = /\b(break\s*down|by\s+bu|by\s+business\s+unit|split\s+by\s+bu)\b/i;
+  if (BREAKDOWN_PAT.test(m)) {
+    // Extract metric and period from client hints if available
+    const params: Record<string, any> = { unit: "ALL" };
+    
+    // Set default top limit
+    params.top = 8;
+    
+    // Check for specific metric in message
+    if (metric) {
+      params.metric = metric;
+    }
+    
+    // Add period if year is mentioned
+    if (years.length > 0) {
+      params.period = { year: years[0] };
+    }
+    
+    return { domain: "metrics", template_id: "metric_breakdown_by_unit_v1", params };
+  }
+  
   // Business units list (broad phrasing): business units / divisions / lines of business / LOB
   const BU_LIST_PAT = /\b(business\s+units?|divisions?|lines?\s+of\s+business|lob?s?)\b/i;
   if (BU_LIST_PAT.test(m)) {

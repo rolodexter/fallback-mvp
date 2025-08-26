@@ -34,6 +34,7 @@ function heuristicRewrite(message: string): RewriteOut | null {
   const wantsTopN =
     /(top|largest|biggest)\s+(customers?|counterpart(y|ies))|concentration/i.test(message);
   const wantsList = /(list|show|display)\s+(business\s*)?units\b|\bunits\b/i.test(message);
+  const wantsBreakdown = /\b(break\s*down|by\s+bu|by\s+business\s+unit|split\s+by\s+bu)\b/i.test(message);
   const wantsSnapshot = /\bsnapshot|overview|bu\b/i.test(message) || !!unit;
 
   // BU name/case like "tell me about our liferafts business"
@@ -46,6 +47,7 @@ function heuristicRewrite(message: string): RewriteOut | null {
   if (wantsTopN) return { canonical: "Top counterparties YTD", confidence: 0.65 };
   if (wantsTrend) return { canonical: "Monthly gross trend", confidence: 0.65 };
   if (wantsList) return { canonical: "List business units", confidence: 0.6 };
+  if (wantsBreakdown) return { canonical: "Metric breakdown by business unit", confidence: 0.75 };
   if (wantsSnapshot && unit) {
     // Preserve tokens
     if (month) return { canonical: `${unit} ${month} snapshot`, confidence: 0.6 };

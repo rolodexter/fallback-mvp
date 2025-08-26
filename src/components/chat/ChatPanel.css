@@ -32,25 +32,35 @@
 }
 
 .data-mode-badge {
-  padding: 4px 10px;
+  padding: 6px 12px;
   border-radius: 16px;
-  font-size: 0.8rem;
-  font-weight: 600;
+  font-size: 0.9rem;
+  font-weight: 700;
   margin-left: 12px;
   display: inline-flex;
   align-items: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  animation: pulse-once 1s ease-in-out;
 }
 
 .mock-data-badge {
-  background-color: #ffe9d9;
+  background-color: #ffe0cc;
   color: #c05621;
-  border: 1px solid #fed7aa;
+  border: 2px solid #ff8a4c;
+  position: relative;
+  z-index: 2;
 }
 
 .live-data-badge {
   background-color: #d9f7e9;
   color: #2c7a7b;
   border: 1px solid #9ae6b4;
+}
+
+@keyframes pulse-once {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+  100% { transform: scale(1); }
 }
 
 .chat-messages {

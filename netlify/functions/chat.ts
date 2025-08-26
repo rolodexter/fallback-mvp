@@ -13,17 +13,18 @@ const GREET_RE = /\b(hi|hello|hey|yo|howdy|greetings|good\s+(morning|afternoon|e
 // Supported data modes
 type DataMode = 'mock' | 'live';
 
+// Extended template result with additional metadata fields
+interface ExtendedTemplateResult {
+  kpiSummary: any;
+  templateOutput: { text: string; widgets?: any; } | null;
+  provenance?: any;
+  meta?: { coverage?: any; [key: string]: any };
+  paging?: { next_page_token?: string; [key: string]: any };
+}
+
 // No dotenv in serverless functions; rely on platform env
 
 // Helpers to detect list widgets robustly (supports `type` or `kind`)
-// Set dataMode as a const to ensure it's used
-const dataMode: DataMode = (() => {
-  // Read from env first
-  const raw = String(process.env.DATA_MODE || '').toLowerCase();
-  if (raw === 'bq' || raw === 'live') return 'live';
-  // Default to mock if not explicitly set
-  return 'mock';
-})();
 
 // Helper to get page size for pagination
 function getPageSize(): number {
@@ -153,6 +154,13 @@ const handler: Handler = async (event) => {
   const polishing = String(process.env.POLISH_NARRATIVE || 'false').toLowerCase() === 'true';
   const allowMockFallback = String(process.env.ALLOW_MOCK_FALLBACK || 'true').toLowerCase() !== 'false';
   console.log(`[Netlify] Using data mode: ${dataMode} | polishing=${polishing} | allowMockFallback=${allowMockFallback}`);
+  
+  // Constants for metrics used in breakdown template
+  const METRIC_OPTIONS = [
+    { id: 'revenue', label: 'Revenue' },
+    { id: 'costs', label: 'Costs' },
+    { id: 'gross', label: 'Gross Profit' }
+  ];
   
   // Check for required environment variables (relaxed in mock unless polishing)
   const requiredEnvVars: string[] = [];
@@ -297,10 +305,18 @@ const handler: Handler = async (event) => {
     // Carry detail knob from hints if provided (client may bump on follow-ups)
     const detail: number | undefined = (typeof clientHints?.prevDetail === 'number') ? clientHints.prevDetail as number : undefined;
 
+    // Safety check - initialize defaults_used early to avoid variable declaration issues
+    const defaults_used: Record<string, any> = {};
+    
     // Slot-fill/Clarify: enforce period defaults and reuse/clarify unit for metric timeseries
     const isTimeseries = (typeof ((templateIdFromBody as string) || det.template_id) === 'string')
       ? (((templateIdFromBody as string) || det.template_id) === 'metric_timeseries_v1')
       : (domainTemplate === 'metric_timeseries_v1');
+      
+    // Slot-fill/Clarify: enforce metric and period defaults for metric breakdown by unit
+    const isBreakdown = (typeof ((templateIdFromBody as string) || det.template_id) === 'string')
+      ? (((templateIdFromBody as string) || det.template_id) === 'metric_breakdown_by_unit_v1')
+      : (domainTemplate === 'metric_breakdown_by_unit_v1');
     if (isTimeseries) {
       // Period default: only when none provided
       if (!params.from && !params.to && !params.year && !params.time_window) {
@@ -310,6 +326,77 @@ const handler: Handler = async (event) => {
         if (!params.granularity) params.granularity = 'month';
         // Track defaults for transparency later in meta
         // defaults_used is declared below; accumulate here and will be spread into meta
+      }
+    }
+    
+    // Handle metric breakdown by business unit template clarification
+    if (isBreakdown) {
+      // If metric is not provided, trigger clarification
+      if (!params.metric) {
+        // Use previous metric if available
+        const prevMetric = clientHints?.prevParams?.metric as string | undefined;
+        if (prevMetric) {
+          params.metric = String(prevMetric).toLowerCase();
+        } else {
+          // Trigger clarification for metric
+          return {
+            statusCode: 200,
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+              'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+              'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+            },
+            body: JSON.stringify({
+              mode: 'clarify',
+              text: 'Which metric would you like to break down by business unit?',
+              clarify: {
+                missing: ['metric'],
+                suggestions: { metric: METRIC_OPTIONS }
+              },
+              meta: {
+                domain: det.domain || (routeResult.domain || ''),
+                confidence: (typeof routeResult.confidence === 'number' ? routeResult.confidence : 0.9),
+                groundingType: 'clarify'
+              },
+              provenance: {
+                tag: 'CLARIFY_REQUIRED',
+                domain: det.domain,
+                template: 'metric_breakdown_by_unit_v1',
+                state: { params }
+              }
+            })
+          };
+        }
+      }
+      
+      // If period is not provided, trigger clarification
+      // We check for both period object and individual year/from/to params
+      if (!params.period && !params.year && !params.from && !params.to) {
+        // Check previous period params
+        const prevPeriod = clientHints?.prevParams?.period;
+        const prevYear = clientHints?.prevParams?.year;
+        
+        if (prevPeriod || prevYear) {
+          // Reuse previous period info
+          if (prevPeriod) params.period = prevPeriod;
+          else if (prevYear) params.year = prevYear;
+        } else {
+          // Default to last 12 months if not specified
+          const { from, to } = last12CompleteMonths();
+          params.from = from;
+          params.to = to;
+          defaults_used.period = 'last_12m';
+        }
+      }
+      
+      // Handle "Show all" chip functionality
+      if (params.showAllUnits === true) {
+        // If user explicitly requests all units, remove top limit
+        params.top = undefined;
+      } else if (!params.top) {
+        // Default to showing top 8 business units
+        params.top = 8;
       }
 
       // Unit handling: reuse previous if present; otherwise clarify
@@ -325,12 +412,12 @@ const handler: Handler = async (event) => {
           
           try {
             // Get first page of BU list for clarify
-            const buListTemplate = await runTemplate('business_units_list_v1', { limit: getPageSize() }, dataMode);
+            const buListTemplate = await runTemplate('business_units_list_v1', { limit: getPageSize() }, dataMode) as ExtendedTemplateResult;
             
             // Extract units from the list widget
             const buListWidgets = buListTemplate?.templateOutput?.widgets;
             if (buListWidgets?.type === 'list' && Array.isArray(buListWidgets.items)) {
-              // Extract coverage info
+              // Extract coverage info from the template result
               coverageInfo = buListTemplate?.meta?.coverage || null;
               
               // Get paging token if available
@@ -413,9 +500,7 @@ const handler: Handler = async (event) => {
       }
     }
 
-    // Slot-fill safe defaults (example: latest complete year when template implies year granularity)
-    const defaults_used: Record<string, any> = {};
-    // If we filled timeseries from/to above, record it here for transparency
+    // If we filled timeseries or breakdown from/to above, record it here for transparency
     if (params && params.from && params.to && !('period' in defaults_used)) {
       // Heuristic: if the caller didn't explicitly pass from/to in body or det, consider it a default
       // We cannot perfectly detect origin here; still useful for UX

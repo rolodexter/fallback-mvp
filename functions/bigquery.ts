@@ -7,6 +7,9 @@ import { getCache, generateStableHash } from '../src/lib/cache';
 // Initialize BigQuery client
 const bigquery = new BigQuery();
 
+// Check data mode: 'bq' or 'mock'
+const dataMode = (process.env.DATA_MODE || 'mock').toLowerCase();
+
 // Check if mock fallback is allowed when BQ fails
 const allowMockFallback = String(process.env.ALLOW_MOCK_FALLBACK || 'true').toLowerCase() !== 'false';
 
@@ -182,7 +185,8 @@ const handler: Handler = async (event) => {
     const body: BigQueryRequest = JSON.parse(event.body || '{}');
     const { template_id, params = {} } = body;
     
-    // Note: DATA_MODE is handled in the executeBigQuery function, not needed here
+    // Check if we're in BigQuery mode or forced mock mode
+    const useMockData = dataMode !== 'bq' && dataMode !== 'live';
     
     if (!template_id) {
       return {
@@ -208,8 +212,25 @@ const handler: Handler = async (event) => {
       params.limit = 5;
     }
     
-    // Execute BigQuery
-    const result = await executeBigQuery(template_id, params);
+    let result: BigQueryResponse;
+    
+    // If we're in mock mode, immediately return mock response
+    if (useMockData) {
+      // Return mock data with indicator
+      result = {
+        success: true,
+        rows: [], // Mock data will be handled on client side
+        source: 'mock',
+        diagnostics: {
+          message: 'Using mock data as configured by DATA_MODE',
+          template_id,
+          params
+        }
+      };
+    } else {
+      // Execute real BigQuery
+      result = await executeBigQuery(template_id, params);
+    }
     
     return {
       statusCode: result.success ? 200 : 500,

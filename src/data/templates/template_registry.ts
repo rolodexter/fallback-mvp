@@ -7,6 +7,7 @@ import * as businessUnitsSnapshotYoYV1 from './business_units_snapshot_yoy_v1.js
 import * as businessUnitsListV1 from './business_units_list_v1.js';
 import * as metricSnapshotYearV1 from './metric_snapshot_year_v1.js';
 import * as metricTimeseriesV1 from './metric_timeseries_v1.js';
+import * as metricBreakdownByUnitV1 from './metric_breakdown_by_unit_v1.js';
 
 const templateRegistry = {
   business_units: {
@@ -57,4 +58,5 @@ export const templateRunners = {
   business_units_list_v1: businessUnitsListV1,
   metric_snapshot_year_v1: metricSnapshotYearV1,
   metric_timeseries_v1: metricTimeseriesV1,
+  metric_breakdown_by_unit_v1: metricBreakdownByUnitV1,
 } as const;
