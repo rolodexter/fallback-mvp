@@ -1,9 +1,45 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { unitLabel } from '../src/data/labels';
 
 // Vercel Node runtime configuration
 export const config = { runtime: 'nodejs' };
 
 type DataMode = 'mock' | 'live';
+
+// Helper: labelize a BU code as "Z001 — Liferafts" if known
+function labelizeUnitCode(code: string): string {
+  const lbl = unitLabel(code);
+  return lbl && lbl !== code ? `${code} — ${lbl}` : code;
+}
+
+// Helper: deep labelize list widgets in-place (supports single or array)
+function labelizeWidgets(w: any): any {
+  if (!w) return w;
+  const apply = (one: any) => {
+    try {
+      const t = String((one?.type ?? one?.kind ?? '')).toLowerCase();
+      if (t === 'list' && Array.isArray(one.items)) {
+        one.items = one.items.map((it: any) => {
+          const s = String(it ?? '');
+          
+          // Skip items that already have a label (contain the em dash)
+          if (s.includes(' — ')) return s;
+          
+          // Check if this looks like a BU code (Z followed by numbers)
+          if (/^Z\d+$/i.test(s)) {
+            const lbl = unitLabel(s);
+            return lbl && lbl !== s ? `${s} — ${lbl}` : s;
+          }
+          
+          return s;
+        });
+      }
+    } catch {}
+    return one;
+  };
+  if (Array.isArray(w)) return w.map(apply);
+  return apply(w);
+}
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   // CORS
@@ -124,6 +160,9 @@ export default async function handler(request: VercelRequest, response: VercelRe
     let widgets: any =
       (tpl as any)?.widgets ??
       ((out && typeof out === 'object') ? ((out as any).widgets ?? null) : null);
+    
+    // Labelize list widgets for executive-friendly display
+    widgets = labelizeWidgets(widgets);
 
     // Pull BigQuery telemetry from per-call template provenance when available
     const bqDiag: any = tpl?.provenance?.bq || null;

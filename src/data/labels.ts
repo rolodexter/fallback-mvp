@@ -1,10 +1,12 @@
 // Human-friendly labels for business unit codes and helpers
 
 export const UNIT_LABELS: Record<string, string> = {
-  // Known examples — extend as needed
+  // Business unit friendly names
   Z001: 'Liferafts',
-  // Z002: '…',
-  // Z003: '…',
+  Z002: 'Marine Safety',
+  Z003: 'Navigation Systems',
+  Z004: 'Commercial Vessels',
+  Z005: 'Port Services'
 };
 
 /**

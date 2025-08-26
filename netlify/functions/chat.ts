@@ -63,9 +63,17 @@ function labelizeWidgets(w: any): any {
       if (t === 'list' && Array.isArray(one.items)) {
         one.items = one.items.map((it: any) => {
           const s = String(it ?? '');
-          // Only transform plausible BU codes (e.g., Z001) when a label exists
-          const lbl = unitLabel(s);
-          return lbl && lbl !== s ? `${s} — ${lbl}` : s;
+          
+          // Skip items that already have a label (contain the em dash)
+          if (s.includes(' — ')) return s;
+          
+          // Check if this looks like a BU code (Z followed by numbers)
+          if (/^Z\d+$/i.test(s)) {
+            const lbl = unitLabel(s);
+            return lbl && lbl !== s ? `${s} — ${lbl}` : s;
+          }
+          
+          return s;
         });
       }
     } catch {}
