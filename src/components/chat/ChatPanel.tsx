@@ -249,6 +249,90 @@ const ChatPanel: React.FC = () => {
     setMessage(chipText);
   };
 
+  // Clarify chip handler: send a follow-up with selected slot value
+  const handleClarifySelect = async (group: string, chip: { id: string; label?: string }) => {
+    const label = chip.label || chip.id;
+    // Show the user's chip click as a message
+    const userMessage: Message = {
+      id: generateId(),
+      text: label,
+      type: 'user',
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, userMessage]);
+    setIsLoading(true);
+
+    // Prepare history for follow-up (append only this synthetic user turn)
+    const capped = chatHistory.slice(-8);
+    const historyToSend: ChatHistoryEntry[] = [
+      ...capped.map(h => ({ role: h.role, content: String(h.content ?? '').trim() })),
+      { role: 'user', content: label }
+    ];
+    setChatHistory(historyToSend);
+
+    // Build applied route from last server echo or lastRouteRef
+    // Prefer server echo from last answer if available
+    const prov: any = lastAnswerRawRef.current?.provenance ?? {};
+    const srvDomain = lastAnswerRawRef.current?.meta?.domain ?? prov.domain;
+    const srvTemplateId = prov?.template_id || prov?.template;
+    const srvParams = prov?.state?.params || {};
+    const applied = lastRouteRef.current || (srvDomain && srvTemplateId ? { domain: srvDomain, template_id: srvTemplateId, params: srvParams } : null);
+    const mergedParams = { ...(applied?.params || {}), [group]: chip.id };
+    // Persist into lastRoute for subsequent follow-ups
+    lastRouteRef.current = { domain: applied?.domain || srvDomain, template_id: applied?.template_id || srvTemplateId, params: mergedParams } as any;
+
+    try {
+      const endpoint = (import.meta.env.VITE_DEPLOY_PLATFORM === 'netlify') ? '/.netlify/functions/chat' : '/api/chat';
+      const client_hints = lastRouteRef.current ? {
+        prevDomain: lastRouteRef.current.domain ?? null,
+        prevTemplate: lastRouteRef.current.template_id ?? null,
+        prevParams: lastRouteRef.current.params ?? null,
+        prevTop: (typeof (lastRouteRef.current.params?.top) === 'number') ? lastRouteRef.current.params.top : null,
+        prevDetail: detailRef.current ?? 0
+      } : undefined;
+      const payload: ChatPayload = {
+        message: label,
+        router: lastRouteRef.current ? {
+          domain: lastRouteRef.current.domain,
+          template_id: lastRouteRef.current.template_id,
+          params: mergedParams
+        } : undefined,
+        template: { id: lastRouteRef.current?.template_id },
+        params: mergedParams,
+        endpoint,
+        history: historyToSend,
+        client_hints
+      };
+      const answer: Answer = await sendChat(payload);
+      console.info('[ANSWER.followup]', answer);
+      renderAnswer(answer);
+      // Refresh lastRouteRef from server echo if available
+      const echoDomain = answer?.meta?.domain ?? (answer?.provenance as any)?.domain;
+      const echoTemplateId = (answer?.provenance as any)?.template_id ?? (answer?.provenance as any)?.template;
+      const echoParams = (answer?.provenance as any)?.state?.params;
+      const echoDetail = (answer?.provenance as any)?.state?.detail;
+      if (echoDomain && echoTemplateId) {
+        lastRouteRef.current = {
+          domain: echoDomain,
+          template_id: echoTemplateId,
+          params: echoParams ?? mergedParams
+        };
+        if (typeof echoDetail === 'number') detailRef.current = echoDetail;
+      }
+    } catch (e) {
+      console.error('[ChatPanel] Clarify follow-up error:', e);
+      const errMsg: Message = {
+        id: generateId(),
+        text: `Error: ${e instanceof Error ? e.message : 'Unknown error'}`,
+        type: 'error',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errMsg]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Renderer accepts answer fields needed for diagnostics
   type RenderableAnswer = Pick<Answer, 'text' | 'kpis' | 'widgets' | 'mode' | 'provenance' | 'reason' | 'abstain_reason' | 'meta'>;
 
@@ -262,6 +346,50 @@ const ChatPanel: React.FC = () => {
         timestamp: new Date()
       };
       setMessages(prevMessages => [...prevMessages, errorMessage]);
+      return;
+    }
+
+    // Special handling: clarify mode renders a chip group and does NOT show an error banner
+    if ((ans as any).mode === 'clarify') {
+      const clar: any = (ans as any).clarify || {};
+      const displayText = (ans as any).text || 'I need a bit more info to continue.';
+      // Save last answer raw for provenance-based route echo
+      lastAnswerRawRef.current = ans;
+      lastAnswerTextRef.current = displayText;
+      const promptMessage: Message = {
+        id: generateId(),
+        text: displayText,
+        type: 'bot',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, promptMessage]);
+      // Push a special clarify widget with chip suggestions
+      const widgetMessage: Message = {
+        id: generateId(),
+        text: '',
+        type: 'bot',
+        timestamp: new Date(),
+        widget: { type: 'clarify', missing: clar.missing, suggestions: clar.suggestions }
+      };
+      setMessages(prev => [...prev, widgetMessage]);
+      // Footer provenance (optional, compact)
+      const prov = (ans as any).provenance || {};
+      const footerParts: string[] = [];
+      if (prov.tag) footerParts.push(`tag=${prov.tag}`);
+      if (prov.template || prov.template_id) footerParts.push(`template=${prov.template || prov.template_id}`);
+      const footerText = `— provenance: ${footerParts.join(' | ')} | domain=${(ans as any)?.meta?.domain || 'n/a'}`;
+      const footerMessage: Message = {
+        id: generateId(),
+        text: footerText,
+        type: 'bot',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, footerMessage]);
+      // Update history with assistant prompt only
+      setChatHistory(prev => [
+        ...prev,
+        { role: 'assistant', content: displayText }
+      ]);
       return;
     }
 
@@ -557,7 +685,21 @@ const ChatPanel: React.FC = () => {
                             ))}
                           </>
                         )
-                      : <WidgetRenderer widget={msg.widget} />)
+                      : (msg.widget?.type === 'clarify' ? (
+                          <div className="example-chips">
+                            {msg.widget?.suggestions?.unit?.map((chip: any, index: number) => (
+                              <button
+                                key={chip.id || index}
+                                className="chip"
+                                onClick={() => handleClarifySelect('unit', chip)}
+                              >
+                                {chip.label || chip.id}
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <WidgetRenderer widget={msg.widget} />
+                        ))
                   : msg.text}
               </div>
               <div className="message-actions">
