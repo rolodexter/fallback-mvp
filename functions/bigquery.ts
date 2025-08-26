@@ -18,6 +18,7 @@ interface BigQueryRequest {
 interface BigQueryResponse {
   success: boolean;
   rows?: any[];
+  source?: 'bq' | 'mock'; // Indicate data source
   diagnostics?: {
     message?: string;
     error?: string;
@@ -28,6 +29,7 @@ interface BigQueryResponse {
     jobId?: string;
     cacheHit?: boolean;
     executionTime?: number;
+    allow_mock_fallback?: boolean; // Indicate if mock fallback is allowed
   };
 }
 
@@ -124,7 +126,9 @@ const executeBigQuery = async (
     return {
       success: true,
       rows,
+      source: 'bq', // Explicitly mark this as BigQuery data
       diagnostics: {
+        message: 'BigQuery executed successfully',
         template_id: templateId,
         params,
         query: sqlQuery,

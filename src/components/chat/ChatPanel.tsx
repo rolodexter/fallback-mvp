@@ -167,6 +167,8 @@ const ChatPanel: React.FC = () => {
   const [showDebug, setShowDebug] = useState<boolean>(false);
   const [showProvenance, setShowProvenance] = useState<boolean>(false);
   const [expanded, setExpanded] = useState<boolean>(false);
+  // Track data mode to display the appropriate badge
+  const [dataMode, setDataMode] = useState<'mock' | 'live'>('mock');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastAnswerRawRef = useRef<any>(null);
   const lastAnswerTextRef = useRef<string>('');
@@ -364,6 +366,11 @@ const ChatPanel: React.FC = () => {
 
   // Function to render an answer to the chat
   const renderAnswer = (ans: RenderableAnswer) => {
+    // Update the data mode badge based on the response
+    if (ans?.provenance?.source) {
+      const source = String(ans.provenance.source).toLowerCase();
+      setDataMode(source === 'mock' ? 'mock' : 'live');
+    }
     if (!ans) {
       const errorMessage: Message = {
         id: generateId(),
@@ -644,9 +651,16 @@ const ChatPanel: React.FC = () => {
     <div className={"chat-panel" + (expanded ? " expanded" : "") }>
       <div className="chat-header">
         <h2>Chat Assistant</h2>
-        {import.meta.env.MODE === 'development' && domain && (
-          <div className="chat-domain">Domain: {domain}</div>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          {import.meta.env.MODE === 'development' && domain && (
+            <div className="chat-domain">Domain: {domain}</div>
+          )}
+          {lastAnswerRawRef.current && (
+            <div className={`data-mode-badge ${dataMode === 'mock' ? 'mock-data-badge' : 'live-data-badge'}`}>
+              {dataMode === 'mock' ? '⚠️ Demo Data' : '✅ Live Data'}
+            </div>
+          )}
+        </div>
         {/* Lightweight QA tools */}
         <div className="chat-tools">
           <button className="tool-btn" onClick={() => setExpanded(v => !v)}>
