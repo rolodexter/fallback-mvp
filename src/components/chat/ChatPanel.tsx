@@ -676,31 +676,31 @@ const ChatPanel: React.FC = () => {
             .map((msg) => (
             <div key={msg.id} className={`chat-message ${msg.type}-message`}>
               <div className="message-content">
-                {msg.widget
-                  ? (Array.isArray(msg.widget)
-                      ? (
-                          <>
-                            {msg.widget.map((w: any, idx: number) => (
-                              <WidgetRenderer key={idx} widget={w} />
-                            ))}
-                          </>
-                        )
-                      : (msg.widget?.type === 'clarify' ? (
-                          <div className="example-chips">
-                            {msg.widget?.suggestions?.unit?.map((chip: any, index: number) => (
-                              <button
-                                key={chip.id || index}
-                                className="chip"
-                                onClick={() => handleClarifySelect('unit', chip)}
-                              >
-                                {chip.label || chip.id}
-                              </button>
-                            ))}
-                          </div>
-                        ) : (
-                          <WidgetRenderer widget={msg.widget} />
-                        ))
-                  : msg.text}
+                {msg.widget ? (
+                  Array.isArray(msg.widget) ? (
+                    <>
+                      {msg.widget.map((w: any, idx: number) => (
+                        <WidgetRenderer key={idx} widget={w} />
+                      ))}
+                    </>
+                  ) : msg.widget?.type === 'clarify' ? (
+                    <div className="example-chips">
+                      {msg.widget?.suggestions?.unit?.map((chip: any, index: number) => (
+                        <button
+                          key={chip.id || index}
+                          className="chip"
+                          onClick={() => handleClarifySelect('unit', chip)}
+                        >
+                          {chip.label || chip.id}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <WidgetRenderer widget={msg.widget} />
+                  )
+                ) : (
+                  msg.text
+                )}
               </div>
               <div className="message-actions">
                 {msg.widget ? (
