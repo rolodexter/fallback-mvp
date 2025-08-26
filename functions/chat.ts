@@ -22,6 +22,9 @@ const PERPLEXITY_API_URL = 'https://api.perplexity.ai/chat/completions';
 const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
 
 export const handler = async (event: any) => {
+  // Delegate to Stage-A handler (router + templates) bundled in netlify/functions
+  const mod = await import('../netlify/functions/chat.js');
+  return await mod.handler(event);
   // Handle preflight OPTIONS requests for CORS
   if (event.httpMethod === 'OPTIONS') {
     return {
