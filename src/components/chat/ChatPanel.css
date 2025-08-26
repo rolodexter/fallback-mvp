@@ -87,6 +87,7 @@
   margin-bottom: 4px;
   word-break: break-word;
   white-space: pre-wrap; /* preserve paragraphs and newlines */
+  padding-right: 56px; /* leave room for copy button */
 }
 
 .message-time {
@@ -212,4 +213,63 @@
 /* Bubble width polish */
 .chat-message {
   max-width: 720px;
+}
+
+/* Header QA tools */
+.chat-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.prov-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #4a5568;
+}
+
+.tool-btn {
+  padding: 6px 10px;
+  background-color: #edf2f7;
+  color: #1f2937;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.tool-btn:hover { background-color: #e2e8f0; }
+
+/* Per-message copy action */
+.message-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0.75;
+}
+
+.copy-btn {
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  background-color: #e5e7eb;
+  border: 1px solid #d1d5db;
+  color: #111827;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.copy-btn:hover {
+  background-color: #dbe1e6;
+  opacity: 1;
+}
+
+/* Dark mode adjustments for tools */
+@media (prefers-color-scheme: dark) {
+  .tool-btn { background-color: #1f2937; color: #e5e7eb; border-color: #374151; }
+  .tool-btn:hover { background-color: #111827; }
+  .copy-btn { background-color: #374151; color: #e5e7eb; border-color: #4b5563; }
+  .copy-btn:hover { background-color: #1f2937; }
 }

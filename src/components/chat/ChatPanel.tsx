@@ -121,7 +121,34 @@ const ChatPanel: React.FC = () => {
   const [domain, setDomain] = useState<string | undefined>(undefined);
   const [templateId, setTemplateId] = useState<string>('');
   const [showDebug, setShowDebug] = useState<boolean>(false);
+  const [showProvenance, setShowProvenance] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastAnswerRawRef = useRef<any>(null);
+  const lastAnswerTextRef = useRef<string>('');
+
+  // --- QA helpers: copy to clipboard ---
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch (e) {
+        console.warn('Copy failed:', e);
+      }
+    }
+  };
+  const handleCopyLastText = () => {
+    if (lastAnswerTextRef.current) copyToClipboard(lastAnswerTextRef.current);
+  };
+  const handleCopyLastJson = () => {
+    if (lastAnswerRawRef.current) copyToClipboard(JSON.stringify(lastAnswerRawRef.current, null, 2));
+  };
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -191,6 +218,9 @@ const ChatPanel: React.FC = () => {
 
     // Prefer top-level fields, but fall back to templateOutput for backward compatibility
     const displayText = ans.text ?? (ans as any)?.templateOutput?.text ?? 'No text.';
+    // Keep last answer for quick QA copy actions
+    lastAnswerRawRef.current = ans;
+    lastAnswerTextRef.current = displayText;
     const widgetData = (ans as any)?.widgets ?? (ans as any)?.templateOutput?.widgets ?? null;
 
     // If server indicates abstain/nodata, surface diagnostics prominently
@@ -357,7 +387,20 @@ const ChatPanel: React.FC = () => {
         {import.meta.env.MODE === 'development' && domain && (
           <div className="chat-domain">Domain: {domain}</div>
         )}
-        
+        {/* Lightweight QA tools */}
+        <div className="chat-tools">
+          <label className="prov-toggle">
+            <input
+              type="checkbox"
+              checked={showProvenance}
+              onChange={(e) => setShowProvenance(e.target.checked)}
+            />
+            <span>Show provenance</span>
+          </label>
+          <button className="tool-btn" onClick={handleCopyLastText} title="Copy last answer text">Copy text</button>
+          <button className="tool-btn" onClick={handleCopyLastJson} title="Copy last answer JSON">Copy JSON</button>
+        </div>
+
         {/* Debug overlay */}
         {showDebug && (
           <div className="debug-overlay">
@@ -391,10 +434,19 @@ const ChatPanel: React.FC = () => {
             </div>
           </div>
         ) : (
-          messages.map((msg) => (
+          messages
+            .filter((m) => showProvenance || !(m.text || '').startsWith('— provenance'))
+            .map((msg) => (
             <div key={msg.id} className={`chat-message ${msg.type}-message`}>
               <div className="message-content">
                 {msg.widget ? <WidgetRenderer widget={msg.widget} /> : msg.text}
+              </div>
+              <div className="message-actions">
+                {msg.widget ? (
+                  <button className="copy-btn" onClick={() => copyToClipboard(JSON.stringify(msg.widget, null, 2))}>Copy</button>
+                ) : (
+                  <button className="copy-btn" onClick={() => copyToClipboard(msg.text)}>Copy</button>
+                )}
               </div>
               {msg.type === 'bot' && msg.text.includes("Stage-A") && (
                 <div className="example-chips">
