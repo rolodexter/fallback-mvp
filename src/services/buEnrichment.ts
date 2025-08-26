@@ -29,25 +29,59 @@ interface EnrichedBusinessUnitData extends BusinessUnitData {
  */
 export async function enrichBusinessUnitData(
   buData: BusinessUnitData[],
-  metric: string
+  metric: string,
+  contextRequest: string = 'top_performers' // 'top_performers' or 'underperformers'
 ): Promise<EnrichedBusinessUnitData[]> {
   if (!buData || buData.length === 0) return [];
 
-  // Identify top business unit
-  const topBu = buData[0];
+  // Identify target business unit
+  const targetBu = buData[0];
+  const isUnderperformer = contextRequest === 'underperformers';
   
-  // Create prompt to analyze the top business unit's importance
-  const analysisPrompt = `
+  // Create appropriate prompt based on context request
+  const analysisPrompt = isUnderperformer ? 
+    // Underperformer analysis prompt
+    `
+You are analyzing the least profitable/performing business unit in our company.
+
+UNDERPERFORMING BUSINESS UNIT:
+- Code: ${targetBu.bu_code}
+- Name: ${targetBu.bu_name}
+- ${metric.toUpperCase()}: ${targetBu.metric_value.toLocaleString()}
+- Share of total: ${targetBu.percentage_of_total}%
+- YoY growth: ${targetBu.yoy_growth_pct}%
+- Performance level: ${targetBu.importance_level || 'Underperforming'}
+- Primary concern: ${targetBu.importance_reason || 'Low performance relative to other units'}
+
+OTHER LOW-PERFORMING UNITS:
+${buData.slice(1, 3).map(bu => `- ${bu.bu_name}: ${bu.percentage_of_total}% of total, ${bu.yoy_growth_pct}% growth`).join('\n')}
+
+Provide a detailed analysis of this underperforming business unit. Include:
+1. Possible causes for underperformance (2-3 sentences)
+2. Key risks if not addressed (1-2 sentences)
+3. Potential turnaround opportunities (1-2 sentences)
+4. Comparison with other underperforming units (1-2 sentences)
+
+Format your response as JSON with these exact fields: 
+{
+  "context": "overall context paragraph",
+  "strategic_importance": "analysis of significance despite poor performance",
+  "challenges": "key challenges and risks",
+  "opportunities": "potential turnaround strategies"
+}
+` :
+    // Top performer analysis prompt
+    `
 You are analyzing the most important business unit in our company.
 
 TOP BUSINESS UNIT:
-- Code: ${topBu.bu_code}
-- Name: ${topBu.bu_name}
-- ${metric.toUpperCase()}: ${topBu.metric_value.toLocaleString()}
-- Share of total: ${topBu.percentage_of_total}%
-- YoY growth: ${topBu.yoy_growth_pct}%
-- Importance: ${topBu.importance_level}
-- Primary reason: ${topBu.importance_reason}
+- Code: ${targetBu.bu_code}
+- Name: ${targetBu.bu_name}
+- ${metric.toUpperCase()}: ${targetBu.metric_value.toLocaleString()}
+- Share of total: ${targetBu.percentage_of_total}%
+- YoY growth: ${targetBu.yoy_growth_pct}%
+- Importance: ${targetBu.importance_level || 'Top Performer'}
+- Primary reason: ${targetBu.importance_reason || 'High contribution to overall business'}
 
 TOP COMPETITOR UNITS:
 ${buData.slice(1, 3).map(bu => `- ${bu.bu_name}: ${bu.percentage_of_total}% of total, ${bu.yoy_growth_pct}% growth`).join('\n')}
@@ -144,28 +178,58 @@ Format your response as JSON with these exact fields:
  */
 export async function synthesizeBuImportanceResponse(
   enrichedData: EnrichedBusinessUnitData[],
-  metric: string
+  metric: string,
+  contextRequest: string = 'top_performers' // 'top_performers' or 'underperformers'
 ): Promise<string> {
   if (!enrichedData || enrichedData.length === 0) {
-    return "I don't have enough information to determine the most important business unit.";
+    return "I don't have enough information to determine the requested business unit performance data.";
   }
 
-  const topBu = enrichedData[0];
+  const targetBu = enrichedData[0];
+  const isUnderperformer = contextRequest === 'underperformers';
   
-  // Create a synthesis prompt
-  const synthesisPrompt = `
+  // Create a synthesis prompt based on context request
+  const synthesisPrompt = isUnderperformer ?
+    // Underperformer synthesis prompt
+    `
+Create a natural, conversational response explaining our least profitable/performing business unit:
+
+BUSINESS UNIT: ${targetBu.bu_name} (${targetBu.bu_code})
+METRICS:
+- ${metric.toUpperCase()}: ${targetBu.metric_value.toLocaleString()}
+- Share of total: ${targetBu.percentage_of_total}%
+- YoY growth: ${targetBu.yoy_growth_pct}%
+
+CONTEXT: ${targetBu.context}
+STRATEGIC IMPORTANCE: ${targetBu.strategic_importance}
+CHALLENGES: ${targetBu.challenges}
+OPPORTUNITIES: ${targetBu.opportunities}
+
+COMPARISON WITH OTHER UNITS:
+${enrichedData.slice(1, 3).map(bu => `- ${bu.bu_name}: ${bu.percentage_of_total}% of total, ${bu.yoy_growth_pct}% growth`).join('\n')}
+
+Write a conversational, executive-friendly response that:
+1. Clearly identifies the least profitable/performing business unit
+2. Explains potential causes for underperformance (using metrics and context)
+3. Briefly mentions key risks and turnaround opportunities
+4. Briefly compares with other underperforming units
+
+Do not use bullet points or headers. Make it flow like a natural conversation. Keep it under 6 sentences total.
+` :
+    // Top performer synthesis prompt
+    `
 Create a natural, conversational response explaining our most important business unit:
 
-BUSINESS UNIT: ${topBu.bu_name} (${topBu.bu_code})
+BUSINESS UNIT: ${targetBu.bu_name} (${targetBu.bu_code})
 METRICS:
-- ${metric.toUpperCase()}: ${topBu.metric_value.toLocaleString()}
-- Share of total: ${topBu.percentage_of_total}%
-- YoY growth: ${topBu.yoy_growth_pct}%
+- ${metric.toUpperCase()}: ${targetBu.metric_value.toLocaleString()}
+- Share of total: ${targetBu.percentage_of_total}%
+- YoY growth: ${targetBu.yoy_growth_pct}%
 
-CONTEXT: ${topBu.context}
-STRATEGIC IMPORTANCE: ${topBu.strategic_importance}
-CHALLENGES: ${topBu.challenges}
-OPPORTUNITIES: ${topBu.opportunities}
+CONTEXT: ${targetBu.context}
+STRATEGIC IMPORTANCE: ${targetBu.strategic_importance}
+CHALLENGES: ${targetBu.challenges}
+OPPORTUNITIES: ${targetBu.opportunities}
 
 COMPARISON WITH OTHER UNITS:
 ${enrichedData.slice(1, 3).map(bu => `- ${bu.bu_name}: ${bu.percentage_of_total}% of total, ${bu.yoy_growth_pct}% growth`).join('\n')}

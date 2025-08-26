@@ -578,27 +578,26 @@ const handler: Handler = async (event) => {
         // Handle business unit importance ranking with enrichment
         if (domainTemplate === 'business_units_ranking_v1' && templateData.templateOutput) {
           try {
-            console.log('[Netlify] Enriching business unit importance data with context');
             const buData = templateData.templateOutput.data;
             const metric = params.metric || 'revenue';
+            const contextRequest = params.context_request || 'top_performers';
+            
+            console.log(`[INFO] Processing business unit ranking with metric=${metric}, contextRequest=${contextRequest}`);
             
             if (buData && Array.isArray(buData) && buData.length > 0) {
-              // Enrich business unit data with contextual information
-              const enrichedData = await enrichBusinessUnitData(buData, metric);
-              
-              // Synthesize natural language response
-              const synthesizedResponse = await synthesizeBuImportanceResponse(enrichedData, metric);
-              
-              // Update template output with enriched data and response
+              const enrichedData = await enrichBusinessUnitData(buData, metric, contextRequest);
+              const synthesizedResponse = await synthesizeBuImportanceResponse(enrichedData, metric, contextRequest);
               templateData.templateOutput.data = enrichedData;
               templateData.templateOutput.text = synthesizedResponse;
               templateData.templateOutput.context_enriched = true;
               
-              console.log('[Netlify] Successfully enriched business unit importance data');
+              console.log(`[INFO] Successfully enriched business unit data with ${contextRequest} context`);
+            } else {
+              console.log(`[WARN] No business unit data available to enrich`);
             }
-          } catch (enrichErr) {
-            console.error('[ERROR] Failed to enrich business unit data:', enrichErr);
-            // Continue with original template data if enrichment fails
+          } catch (err) {
+            console.error(`[ERROR] Failed to enrich business unit data:`, err);
+            // Continue with original data if enrichment fails
           }
         }
 

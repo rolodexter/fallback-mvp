@@ -28,15 +28,21 @@ ranked_units AS (
     ym.metric_value,
     SAFE_DIVIDE(ym.metric_value, t.total_value) AS share_of_total,
     SAFE_DIVIDE(ym.metric_value - ym.prev_year_value, ym.prev_year_value) AS yoy_growth,
-    -- Calculate an importance score based on multiple factors:
-    -- 1. Absolute size (50%)
-    -- 2. Share of total (30%)
-    -- 3. Growth rate (20%)
-    (
-      RANK() OVER (ORDER BY ym.metric_value DESC) * 0.5 +
-      RANK() OVER (ORDER BY SAFE_DIVIDE(ym.metric_value, t.total_value) DESC) * 0.3 +
-      RANK() OVER (ORDER BY SAFE_DIVIDE(ym.metric_value - ym.prev_year_value, ym.prev_year_value) DESC) * 0.2
-    ) AS importance_score
+    -- Calculate importance score based on metric value (with configurable direction)
+    -- For 'desc' (default): higher values = better rank
+    -- For 'asc': lower values = better rank
+    CASE
+      WHEN '@sort' = 'asc' THEN (
+        RANK() OVER (ORDER BY ym.metric_value ASC) * 0.5 +
+        RANK() OVER (ORDER BY SAFE_DIVIDE(ym.metric_value, t.total_value) ASC) * 0.3 +
+        RANK() OVER (ORDER BY SAFE_DIVIDE(ym.metric_value - ym.prev_year_value, ym.prev_year_value) ASC) * 0.2
+      )
+      ELSE (
+        RANK() OVER (ORDER BY ym.metric_value DESC) * 0.5 +
+        RANK() OVER (ORDER BY SAFE_DIVIDE(ym.metric_value, t.total_value) DESC) * 0.3 +
+        RANK() OVER (ORDER BY SAFE_DIVIDE(ym.metric_value - ym.prev_year_value, ym.prev_year_value) DESC) * 0.2
+      )
+    END AS importance_score
   FROM yearly_metric ym
   CROSS JOIN total_metric t
   LEFT JOIN `@dim_table` d ON d.comp_code = ym.bu_code
