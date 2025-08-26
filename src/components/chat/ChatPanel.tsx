@@ -115,6 +115,8 @@ type ChatHistoryEntry = {
  
  // Short, common follow-ups that lack domain cues
  const FOLLOWUP_RE = /^(tell me more|continue|more details?|details|expand|what else|go on|show more|drill ?down|yes,? continue)\b/i;
+ // Friendly greetings/help that shouldn't error
+ const GREETING_RE = /^(hi|hello|hey|howdy|hiya|yo|good\s+(morning|afternoon|evening)|help|start|get started|what can you do)\b/i;
 
 const ChatPanel: React.FC = () => {
   const [message, setMessage] = useState('');
@@ -353,6 +355,18 @@ const ChatPanel: React.FC = () => {
     if (!applied && looksLikeFollowup && lastRouteRef.current) {
       applied = lastRouteRef.current;
     }
+    // UX hot-patch: if greeting/help and no deterministic route and no prior route, bypass server and render an overview
+    if (!applied && GREETING_RE.test(message) && !lastRouteRef.current) {
+      setIsLoading(false);
+      const localOverview: RenderableAnswer = {
+        text: 'Stage-A overview: You can ask about Business Units (YoY), Top Counterparties, or Monthly Gross Trend.',
+        mode: 'strict',
+        meta: { domain: 'overview' },
+        provenance: { tag: 'client_overview' } as any
+      } as any;
+      renderAnswer(localOverview);
+      return;
+    }
     if (applied && applied.domain && applied.template_id) {
       setDomain(applied.domain);
       setTemplateId(applied.template_id);
@@ -389,8 +403,8 @@ const ChatPanel: React.FC = () => {
       console.info('[ANSWER]', answer);
       renderAnswer(answer);
       // Refresh lastRouteRef from server echo if available
-      const srvDomain = answer?.meta?.domain;
-      const srvTemplateId = (answer?.provenance as any)?.template_id;
+      const srvDomain = answer?.meta?.domain ?? (answer?.provenance as any)?.domain;
+      const srvTemplateId = (answer?.provenance as any)?.template_id ?? (answer?.provenance as any)?.template;
       if (srvDomain && srvTemplateId) {
         lastRouteRef.current = {
           domain: srvDomain,

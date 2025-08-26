@@ -39,6 +39,12 @@ const MONTHS_MAP: Record<string, string> = {
 export function routeMessage(msg: string): RouteHit {
   const m = (msg||'').toLowerCase().trim();
 
+  // Greeting/help fallback: always safe to show BU list in Stage-A
+  const GREET_RE = /^(hi|hello|hey|howdy|hiya|yo|good\s+(morning|afternoon|evening)|help|start|get started|what can you do)\b/i;
+  if (GREET_RE.test(m)) {
+    return { domain: "business_units", template_id: "business_units_list_v1", params: {} };
+  }
+
   const bu = m.match(/\b(z0\d{2}|z\d{3})\b/);
   const monKey = Object.keys(MONTHS_MAP).find(x => m.includes(x));
   const mon = monKey ? MONTHS_MAP[monKey] : undefined;

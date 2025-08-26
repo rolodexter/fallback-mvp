@@ -35,6 +35,7 @@ const handler: Handler = async (event) => {
     return {
       statusCode: 204,
       headers: {
+        'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
@@ -161,7 +162,15 @@ const handler: Handler = async (event) => {
       : (domainRouteMessage(message) as { domain?: string; confidence?: number });
 
     // Deterministic topic routing from canonical or original message (maps to template_id + params)
-    const det = topicRouteMessage(canonicalMsg || message) as { domain?: string; template_id?: string; params?: Record<string, any> };
+    let det = topicRouteMessage(canonicalMsg || message) as { domain?: string; template_id?: string; params?: Record<string, any> };
+
+    // Server fallback for greetings/help -> safe BU list template
+    const GREET_RE = /^(hi|hello|hey|howdy|hiya|yo|good\s+(morning|afternoon|evening)|help|start|get started|what can you do)\b/i;
+    let fallbackGreetingApplied = false;
+    if ((!det || !det.template_id) && GREET_RE.test(message)) {
+      det = { domain: 'business_units', template_id: 'business_units_list_v1', params: {} };
+      fallbackGreetingApplied = true;
+    }
 
     // Resolve the template key preference order: explicit templateId -> deterministic route -> domain
     let domainTemplate: string | undefined = (templateIdFromBody as string) || det.template_id || (routeResult.domain && routeResult.domain !== 'none' ? routeResult.domain : undefined);
@@ -369,7 +378,7 @@ BIGQUERY DATA:\n${resultsText}`;
         meta: {
           domain,
           confidence: routeResult.confidence,
-          groundingType
+          groundingType: (fallbackGreetingApplied ? 'fallback_greeting' : groundingType)
         },
         provenance: {
           template_id: domainTemplate,

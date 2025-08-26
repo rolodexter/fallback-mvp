@@ -18,9 +18,11 @@ export type ChatResponse = {
 export type GroundingPayload = {
   domain: string | null;
   confidence: number;
-  groundingType: "intro" | "drilldown" | "no_data" | null;
+  // Be permissive on server-emitted grounding types (e.g., 'template', 'drilldown', 'fallback_greeting')
+  groundingType: string | null;
   kpiSummary?: string | null;
-  templateOutput?: string | null;
+  // Server may attach structured template output (text + widgets)
+  templateOutput?: any;
   bigQueryData?: any[] | null;
 };
 
