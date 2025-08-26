@@ -199,9 +199,13 @@ export function routeMessage(msg: string): RouteHit {
   // Business units ranking by importance (top/largest/most important/best performing) OR least important/profitable
   const BU_RANK_BEST_PAT = /\b(most\s+important|top|best|largest|biggest|highest|main|primary|key|critical|strategic|valuable)\b/i;
   const BU_RANK_WORST_PAT = /\b(least|worst|lowest|smallest|weakest|poorest|underperforming)\b/i;
-  const BU_SUBJECT_PAT = /\b(business\s+units?|division|bu|bus|lob)s?\b/i;
+  const BU_SUBJECT_PAT = /\b(business\s+units?|division|bu|bus|lob|department|segment)s?\b/i;
+  const PROFIT_METRIC_PAT = /\b(profit|profitable|margin|revenue|earning|income)\b/i;
+  const TEMPORAL_PAT = /\b(ever|all[\s-]time|history|historical|of all time)\b/i;
   
-  if ((BU_RANK_BEST_PAT.test(m) || BU_RANK_WORST_PAT.test(m)) && BU_SUBJECT_PAT.test(m)) {
+  // Match explicit BU ranking OR profit/revenue ranking (which implies BUs)
+  if ((BU_RANK_BEST_PAT.test(m) || BU_RANK_WORST_PAT.test(m)) && 
+      (BU_SUBJECT_PAT.test(m) || (PROFIT_METRIC_PAT.test(m) && !m.includes("margin by")))) {
     // Determine if looking for best or worst performers
     const isDescending = BU_RANK_BEST_PAT.test(m); // true = highest first, false = lowest first
     

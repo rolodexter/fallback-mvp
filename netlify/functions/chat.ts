@@ -17,10 +17,19 @@ type DataMode = 'mock' | 'live';
 // Extended template result with additional metadata fields
 interface ExtendedTemplateResult {
   kpiSummary: any;
-  templateOutput: { text: string; widgets?: any; } | null;
+  templateOutput: TemplateOutput | null;
   provenance?: any;
   meta?: { coverage?: any; [key: string]: any };
   paging?: { next_page_token?: string; [key: string]: any };
+}
+
+// Template output structure that supports both basic text and enriched data formats
+interface TemplateOutput {
+  text: string; 
+  widgets?: any;
+  data?: any[];
+  context_enriched?: boolean;
+  [key: string]: any; // Allow additional properties for flexibility
 }
 
 // No dotenv in serverless functions; rely on platform env
@@ -150,8 +159,10 @@ const handler: Handler = async (event) => {
     };
   }
   
-  // Check which data mode we're in (mock or live). Default to mock for Stage-A.
-  const dataMode: DataMode = (String(process.env.DATA_MODE || 'mock').toLowerCase() === 'mock' ? 'mock' : 'live');
+  // Check which data mode we're in (mock or live/bq). Default to mock for Stage-A.
+  const rawDataMode = String(process.env.DATA_MODE || 'mock').toLowerCase();
+  const dataMode: DataMode = (rawDataMode === 'mock' ? 'mock' : 'live');
+  console.log(`[Netlify] Raw DATA_MODE from env: ${rawDataMode}`);
   const polishing = String(process.env.POLISH_NARRATIVE || 'false').toLowerCase() === 'true';
   const allowMockFallback = String(process.env.ALLOW_MOCK_FALLBACK || 'true').toLowerCase() !== 'false';
   console.log(`[Netlify] Using data mode: ${dataMode} | polishing=${polishing} | allowMockFallback=${allowMockFallback}`);
@@ -551,13 +562,16 @@ const handler: Handler = async (event) => {
         const templateData = await runTemplate(domainTemplate, params ?? null);
 
         // Labelize list widgets coming from templates (exec-friendly)
-        const labeledWidgets = labelizeWidgets(templateData.templateOutput?.widgets);
+        const primaryLabeledWidgets = labelizeWidgets(templateData.templateOutput?.widgets);
 
+        // Ensure template output has correct typing
+        const primaryTypedOutput = templateData.templateOutput as TemplateOutput | null;
+        
         groundingData = {
           domain: det.domain || (routeResult.domain || ''),
           confidence: (typeof routeResult.confidence === 'number' ? routeResult.confidence : 0.9),
           kpiSummary: templateData.kpiSummary || null,
-          templateOutput: templateData.templateOutput ? { ...templateData.templateOutput, widgets: labeledWidgets ?? templateData.templateOutput.widgets } : null,
+          templateOutput: primaryTypedOutput ? { ...primaryTypedOutput, widgets: primaryLabeledWidgets ?? primaryTypedOutput.widgets } : null,
           groundingType: 'template'
         };
       } catch (err) {
@@ -578,22 +592,121 @@ const handler: Handler = async (event) => {
         // Handle business unit importance ranking with enrichment
         if (domainTemplate === 'business_units_ranking_v1' && templateData.templateOutput) {
           try {
-            const buData = templateData.templateOutput.data;
+            console.log(`[DEBUG] Template output structure:`, JSON.stringify(templateData.templateOutput));
+            
+            // Get business unit data from template output
+            // Handle both structures: { data: [] } and direct array formats for flexibility
+            let buData: any[] = [];
+            if (Array.isArray(templateData.templateOutput)) {
+              buData = templateData.templateOutput;
+            } else {
+              // Safe access to the data property which might not exist
+              const output = templateData.templateOutput as TemplateOutput;
+              if (Array.isArray(output.data)) {
+                buData = output.data;
+              } else if (typeof output.text !== 'string' && Array.isArray(output.text)) {
+                buData = output.text;
+              }
+            }
+            
+            // If we have a JSON string, try to parse it
+            if (typeof buData === 'string') {
+              try {
+                buData = JSON.parse(buData);
+              } catch (e) {
+                console.warn('[WARN] Could not parse BU data string as JSON');
+                buData = [];
+              }
+            }
+            
             const metric = params.metric || 'revenue';
             const contextRequest = params.context_request || 'top_performers';
             
             console.log(`[INFO] Processing business unit ranking with metric=${metric}, contextRequest=${contextRequest}`);
+            console.log(`[DEBUG] BU Data structure:`, typeof buData, Array.isArray(buData), buData && Array.isArray(buData) ? buData.length : 0);
             
             if (buData && Array.isArray(buData) && buData.length > 0) {
+              console.log(`[INFO] Business units found: ${buData.length}`);
+              console.log(`[DEBUG] First BU:`, JSON.stringify(buData[0]));
+              
               const enrichedData = await enrichBusinessUnitData(buData, metric, contextRequest);
               const synthesizedResponse = await synthesizeBuImportanceResponse(enrichedData, metric, contextRequest);
-              templateData.templateOutput.data = enrichedData;
-              templateData.templateOutput.text = synthesizedResponse;
-              templateData.templateOutput.context_enriched = true;
+              
+              // Store the enriched data and synthesized response
+              if (Array.isArray(templateData.templateOutput)) {
+                templateData.templateOutput = { 
+                  data: enrichedData, 
+                  text: synthesizedResponse,
+                  context_enriched: true 
+                } as TemplateOutput;
+              } else {
+                const output = templateData.templateOutput as TemplateOutput;
+                output.data = enrichedData;
+                output.text = synthesizedResponse;
+                output.context_enriched = true;
+              }
               
               console.log(`[INFO] Successfully enriched business unit data with ${contextRequest} context`);
             } else {
-              console.log(`[WARN] No business unit data available to enrich`);
+              // Mock data for demo mode when original data is missing
+              if (dataMode === 'mock') {
+                console.log('[INFO] Generating mock business unit data for enrichment');
+                
+                // Create minimal mock data structure for enrichment
+                const mockBuData = [
+                  {
+                    bu_code: 'Z001',
+                    bu_name: 'Liferafts',
+                    metric_value: 1200000,
+                    percentage_of_total: 35.2,
+                    yoy_growth_pct: 12.3,
+                    importance_level: contextRequest === 'top_performers' ? 'Most Important' : 'Least Performing',
+                    importance_reason: contextRequest === 'top_performers' ? 
+                      'Major contributor with over 25% of total' : 
+                      'Underperforming despite significant market share'
+                  },
+                  {
+                    bu_code: 'Z002',
+                    bu_name: 'Safety Equipment',
+                    metric_value: 980000,
+                    percentage_of_total: 28.7,
+                    yoy_growth_pct: 8.5,
+                    importance_level: 'Very Important',
+                    importance_reason: 'Consistent performer'
+                  },
+                  {
+                    bu_code: 'Z003',
+                    bu_name: 'Navigation Systems',
+                    metric_value: 750000,
+                    percentage_of_total: 22.0,
+                    yoy_growth_pct: 15.2,
+                    importance_level: 'Important',
+                    importance_reason: 'Fast growing unit with over 20% YoY growth'
+                  }
+                ];
+                
+                // Enrich the mock data
+                const enrichedData = await enrichBusinessUnitData(mockBuData, metric, contextRequest);
+                const synthesizedResponse = await synthesizeBuImportanceResponse(enrichedData, metric, contextRequest);
+                
+                // Use the enriched mock data
+                if (Array.isArray(templateData.templateOutput)) {
+                  templateData.templateOutput = { 
+                    data: enrichedData, 
+                    text: synthesizedResponse,
+                    context_enriched: true 
+                  } as TemplateOutput;
+                } else {
+                  const output = templateData.templateOutput as TemplateOutput;
+                  output.data = enrichedData;
+                  output.text = synthesizedResponse;
+                  output.context_enriched = true;
+                }
+                
+                console.log(`[INFO] Successfully created mock business unit data with ${contextRequest} context`);
+              } else {
+                console.log(`[WARN] No business unit data available to enrich and not in mock mode`);
+              }
             }
           } catch (err) {
             console.error(`[ERROR] Failed to enrich business unit data:`, err);
@@ -601,11 +714,17 @@ const handler: Handler = async (event) => {
           }
         }
 
+        // Labelize list widgets coming from templates (exec-friendly)
+        const fallbackLabeledWidgets = labelizeWidgets(templateData.templateOutput?.widgets);
+
+        // Ensure template output has correct typing
+        const fallbackTypedOutput = templateData.templateOutput as TemplateOutput | null;
+        
         groundingData = {
           domain: det.domain || (routeResult.domain || ''),
           confidence: (typeof routeResult.confidence === 'number' ? routeResult.confidence : 0.9),
           kpiSummary: templateData.kpiSummary || null,
-          templateOutput: templateData.templateOutput ? { ...templateData.templateOutput, widgets: labeledWidgets ?? templateData.templateOutput.widgets } : null,
+          templateOutput: fallbackTypedOutput ? { ...fallbackTypedOutput, widgets: fallbackLabeledWidgets ?? fallbackTypedOutput.widgets } : null,
           groundingType: 'drilldown',
           bigQueryData: null
         };
