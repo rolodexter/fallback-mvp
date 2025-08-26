@@ -19,7 +19,7 @@ function resolveAliasToUnit(message: string): string | null {
 
 function extractTokens(msg: string) {
   const aliasUnit = resolveAliasToUnit(msg);
-  const unit = aliasUnit ?? (msg.match(/\bZ\d{3}\b/i) || [])[0]?.toUpperCase() || null;
+  const unit = aliasUnit ?? (((msg.match(/\bZ\d{3}\b/i) || [])[0]?.toUpperCase()) || null);
   const year = (msg.match(/\b(20\d{2})\b/) || [])[1] || null;
   const month = (msg.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\b/i) || [])[0] || null;
   return { unit, year, month };
@@ -173,13 +173,14 @@ async function callLLM(message: string): Promise<RewriteOut | null> {
 }
 
 export async function rewriteMessage(message: string): Promise<RewriteOut | null> {
-  // Only rewrite when enabled
-  if (process.env.NARRATIVE_MODE !== "llm") return null;
+  const llmEnabled = process.env.NARRATIVE_MODE === "llm";
 
-  // Try LLM first (fast + low temperature + short timeout)
-  const llm = await callLLM(message);
-  if (llm) return llm;
+  // Try LLM first (fast + low temperature + short timeout) when enabled
+  if (llmEnabled) {
+    const llm = await callLLM(message);
+    if (llm) return llm;
+  }
 
-  // Fallback heuristics so we still help without the model
+  // Always use heuristics as a safety net, even if LLM is disabled
   return heuristicRewrite(message);
 }

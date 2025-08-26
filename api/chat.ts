@@ -51,11 +51,13 @@ export default async function handler(request: VercelRequest, response: VercelRe
   try {
     const { rewriteMessage } = await import('../src/services/semanticRewrite.js');
     const out = await rewriteMessage(originalMessage);
-    const thresh = Number(process.env.LLM_REWRITE_CONFIDENCE ?? 0.6);
+    const llmEnabled = String(process.env.NARRATIVE_MODE || '').toLowerCase() === 'llm';
+    const envThresh = Number(process.env.LLM_REWRITE_CONFIDENCE ?? 0.6);
+    const thresh = llmEnabled ? envThresh : Math.min(envThresh, 0.5);
     if (out && (out.confidence ?? 0) >= thresh) {
       message = out.canonical;
       rewriteApplied = true;
-      rewriteInfo = { tag: 'LLM_REWRITE_APPLIED', rewriteConfidence: out.confidence, originalMessage, rewritten: message };
+      rewriteInfo = { tag: 'LLM_REWRITE_APPLIED', rewriteConfidence: out.confidence, originalMessage, rewritten: message, llmEnabled };
     }
   } catch (e) {
     rewriteInfo = { tag: 'LLM_REWRITE_FAIL', error: (e as any)?.message ?? String(e), originalMessage };
