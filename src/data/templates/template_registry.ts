@@ -5,6 +5,8 @@ import * as monthlyGrossTrendV1 from './monthly_gross_trend_v1.js';
 import * as topCounterpartiesGrossV1 from './top_counterparties_gross_v1.js';
 import * as businessUnitsSnapshotYoYV1 from './business_units_snapshot_yoy_v1.js';
 import * as businessUnitsListV1 from './business_units_list_v1.js';
+import * as metricSnapshotYearV1 from './metric_snapshot_year_v1.js';
+import * as metricTimeseriesV1 from './metric_timeseries_v1.js';
 
 const templateRegistry = {
   business_units: {
@@ -53,4 +55,6 @@ export const templateRunners = {
   monthly_gross_trend_v1: monthlyGrossTrendV1,
   top_counterparties_gross_v1: topCounterpartiesGrossV1,
   business_units_list_v1: businessUnitsListV1,
+  metric_snapshot_year_v1: metricSnapshotYearV1,
+  metric_timeseries_v1: metricTimeseriesV1,
 } as const;

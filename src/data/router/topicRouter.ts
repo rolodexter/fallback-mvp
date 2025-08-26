@@ -45,10 +45,75 @@ export function routeMessage(msg: string): RouteHit {
     return { domain: "business_units", template_id: "business_units_list_v1", params: {} };
   }
 
+  // Router 2.0: Metrics deterministic routing
+  // Lexicon for metrics and synonyms
+  const METRIC_ALIASES: Record<string, 'revenue'|'costs'|'gross'> = {
+    revenue: 'revenue', sales: 'revenue', turnover: 'revenue',
+    cost: 'costs', costs: 'costs', expense: 'costs', expenses: 'costs',
+    gross: 'gross'
+  };
+  const metricKey = Object.keys(METRIC_ALIASES).find(k => m.includes(k));
+  const metric = metricKey ? METRIC_ALIASES[metricKey] : undefined;
+
+  // BU code if present, to scope metric if provided
   const bu = m.match(/\b(z0\d{2}|z\d{3})\b/);
+
+  // Years present in the message
+  const yearMatches = m.match(/\b(19|20)\d{2}\b/g);
+  const years = yearMatches ? yearMatches.map(y => parseInt(y, 10)).slice(0, 2) : [];
+
+  // Trend / timeseries intent
+  const wantsTrend = /(trend|trending|trajectory|history|historical|since|over|m\/m|mom|monthly|quarterly|yearly|by\s+month|by\s+quarter|by\s+year)/i.test(m);
+
+  // Granularity detection
+  let granularity: 'month'|'quarter'|'year' = 'month';
+  if (/quarter|q\d\b|by\s+quarter/i.test(m)) granularity = 'quarter';
+  else if (/yearly|annual|by\s+year/i.test(m)) granularity = 'year';
+
+  // If metric trend is requested, route to metric_timeseries_v1
+  if (metric && wantsTrend) {
+    let from: string | undefined;
+    let to: string | undefined;
+    const now = new Date();
+    const defaultTo = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    if (/since\s+(19|20)\d{2}/i.test(m) && years.length >= 1) {
+      from = `${years[0]}-01`;
+      to = defaultTo;
+    } else if (years.length >= 2) {
+      const y1 = Math.min(years[0], years[1]);
+      const y2 = Math.max(years[0], years[1]);
+      from = `${y1}-01`;
+      to = `${y2}-12`;
+    } else if (years.length === 1) {
+      // single year with trend intent => from that year to now
+      from = `${years[0]}-01`;
+      to = defaultTo;
+    } else {
+      // default: last 24 months
+      const endY = now.getFullYear();
+      const endM = now.getMonth()+1;
+      const startDate = new Date(endY, endM - 1 - 23, 1);
+      from = `${startDate.getFullYear()}-${String(startDate.getMonth()+1).padStart(2,'0')}`;
+      to = `${endY}-${String(endM).padStart(2,'0')}`;
+    }
+    const params: Record<string, any> = { metric, from, to, granularity };
+    if (bu) params.unit = bu[0].toUpperCase();
+    return { domain: 'metrics', template_id: 'metric_timeseries_v1', params };
+  }
+
+  // Metric snapshot for a specific year, e.g., "costs 2015" or "revenue 2024?"
+  if (metric && !wantsTrend) {
+    const year = years[0] ?? (new Date().getFullYear() - 1);
+    const params: Record<string, any> = { metric, year };
+    if (bu) params.unit = bu[0].toUpperCase();
+    return { domain: 'metrics', template_id: 'metric_snapshot_year_v1', params };
+  }
+
+  // Re-detect BU for BU snapshot routes (variable name reused above for metrics)
+  const bu2 = m.match(/\b(z0\d{2}|z\d{3})\b/);
   const monKey = Object.keys(MONTHS_MAP).find(x => m.includes(x));
   const mon = monKey ? MONTHS_MAP[monKey] : undefined;
-  if (bu && mon && m.includes("snapshot")) {
+  if (bu2 && mon && m.includes("snapshot")) {
     // Build first-of-month ISO (YYYY-MM-01)
     const months = [
       'january','february','march','april','may','june','july','august','september','october','november','december'
@@ -61,26 +126,26 @@ export function routeMessage(msg: string): RouteHit {
     return {
       domain: "business_units",
       template_id: "business_units_snapshot_yoy_v1",
-      params: { unit: bu[0].toUpperCase(), month: monthIso, year: inferredYear }
+      params: { unit: bu2[0].toUpperCase(), month: monthIso, year: inferredYear }
     };
   }
 
   // BU snapshot: allow year-only or generic "Z001 snapshot" without month
-  if (bu && m.includes("snapshot") && !mon) {
+  if (bu2 && m.includes("snapshot") && !mon) {
     const yearMatch = m.match(/\b(20\d{2}|19\d{2})\b/);
     const inferredYear = yearMatch ? parseInt(yearMatch[1], 10) : (new Date().getFullYear() - 1);
     return {
       domain: "business_units",
       template_id: "business_units_snapshot_yoy_v1",
-      params: { unit: bu[0].toUpperCase(), year: inferredYear }
+      params: { unit: bu2[0].toUpperCase(), year: inferredYear }
     };
   }
 
   // BU year mention like "Z001 2024" (no explicit snapshot/month)
-  if (bu && !mon) {
+  if (bu2 && !mon) {
     const yearMatch = m.match(/\b(20\d{2}|19\d{2})\b/);
     if (yearMatch) {
-      return { domain: "business_units", template_id: "business_units_snapshot_yoy_v1", params: { unit: bu[0].toUpperCase(), year: parseInt(yearMatch[1], 10) } };
+      return { domain: "business_units", template_id: "business_units_snapshot_yoy_v1", params: { unit: bu2[0].toUpperCase(), year: parseInt(yearMatch[1], 10) } };
     }
   }
 
@@ -187,6 +252,11 @@ export function routeToTemplate(routerResult: RouterResult, message: string): To
   // Profitability summary
   if (domain === 'profitability') {
     return { domain, template_id: 'profitability_summary_v1', params: {} };
+  }
+
+  // Metrics fallback: default to snapshot if only domain detected
+  if (domain === 'metrics') {
+    return { domain, template_id: 'metric_snapshot_year_v1', params: {} };
   }
   
   // Default to domain-named template if exists

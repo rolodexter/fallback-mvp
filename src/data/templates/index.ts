@@ -24,6 +24,9 @@ const TEMPLATE_ID_TO_DOMAIN: Record<string, string> = {
   business_units_list_v1: 'business_units',
   // Regional
   regional_performance_v1: 'regional',
+  // Metrics
+  metric_snapshot_year_v1: 'metrics',
+  metric_timeseries_v1: 'metrics',
 };
 
 type BusinessUnit = {
