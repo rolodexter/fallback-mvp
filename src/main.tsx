@@ -31,16 +31,35 @@ if (import.meta.env.MODE === 'development') {
 
   // Dev-only chat client shim for browser smoke tests
   // Exposes window.chatClient with a simple sendChat(message) wrapper
-  import('./services/chatClient').then(({ sendChat }) => {
+  import('./services/chatClient').then(({ sendChat, chatClient }) => {
     const platform = import.meta.env.VITE_DEPLOY_PLATFORM || 'vercel';
     const endpoint = platform === 'netlify' ? '/.netlify/functions/chat' : '/api/chat';
 
-    (window as any).chatClient = {
+    // Initialize the chatClient and assign to window
+    window.chatClient = {
       initialized: true,
       endpoint,
+      lastRequest: null,
       // Keep signature compatible with smoke_test.js: sendChat(message, [])
       sendChat: (message: string, _attachments?: any[]) =>
-        sendChat({ message, endpoint })
+        sendChat({ message, endpoint }),
+      // Initialize with our implementation
+      init: chatClient.init.bind(chatClient),
+      sendMessage: (message: string) => {
+        if (window.handleUserChat) {
+          window.handleUserChat(message);
+        }
+      },
+      sendTemplate: (domain: string, template_id: string, params: Record<string, any> = {}) => {
+        // Store the request for potential reuse (e.g., "Show all")
+        window.chatClient!.lastRequest = { domain, template_id, params };
+        
+        // Format a message that includes template routing information
+        if (window.handleUserChat) {
+          const routerPayload = { domain, template_id, params };
+          window.handleUserChat("", { router: routerPayload });
+        }
+      }
     };
 
     window.__riskillDebug = window.__riskillDebug || {};
