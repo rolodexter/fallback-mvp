@@ -125,6 +125,8 @@ const ChatPanel: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastAnswerRawRef = useRef<any>(null);
   const lastAnswerTextRef = useRef<string>('');
+  // Remember last successful deterministic route for follow-ups like "tell me more"
+  const lastRouteRef = useRef<{ domain?: string; template_id?: string; params?: Record<string, any> } | null>(null);
 
   // --- QA helpers: copy to clipboard ---
   const copyToClipboard = async (text: string) => {
@@ -325,8 +327,9 @@ const ChatPanel: React.FC = () => {
     setIsLoading(true);
     setMessage('');
     
-    // Update chat history
-    setChatHistory(prev => [...prev, { role: 'user', content: message }]);
+    // Prepare chat history to send with this turn (include this user message)
+    const historyToSend: ChatHistoryEntry[] = [...chatHistory, { role: 'user', content: message }];
+    setChatHistory(historyToSend);
 
     // Determine the endpoint based on platform
     const endpoint = (import.meta.env.VITE_DEPLOY_PLATFORM === "netlify")
@@ -336,10 +339,13 @@ const ChatPanel: React.FC = () => {
     // Step 1: Deterministic routing for canonical prompts (client hint only)
     const r = routeMessage(message);
     console.info('[ROUTE]', r);
-    // Only set domain/template when routing succeeds; always continue to call API
-    if (r?.domain && r.template_id) {
-      setDomain(r.domain);
-      setTemplateId(r.template_id);
+    // Apply current deterministic route if present, otherwise fall back to last successful route
+    const applied = (r && r.domain && r.template_id) ? r : (lastRouteRef.current || {});
+    if (applied && applied.domain && applied.template_id) {
+      setDomain(applied.domain);
+      setTemplateId(applied.template_id);
+      // Cache as last successful route for subsequent short follow-ups
+      lastRouteRef.current = applied;
     } else {
       setDomain(undefined);
       setTemplateId('');
@@ -349,10 +355,11 @@ const ChatPanel: React.FC = () => {
       // Stage-A payload typing for compile-time safety
       const payload: ChatPayload = {
         message,
-        router: { domain: r.domain },
-        template: { id: r.template_id },
-        params: r.params || {},
-        endpoint
+        router: { domain: (applied as any)?.domain },
+        template: { id: (applied as any)?.template_id },
+        params: (applied as any)?.params || {},
+        endpoint,
+        history: historyToSend
       };
 
       const answer: Answer = await sendChat(payload);

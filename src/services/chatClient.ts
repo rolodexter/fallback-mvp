@@ -289,6 +289,8 @@ export type ChatPayload = {
   template?: { id?: string };
   params?:   Record<string, any>;
   endpoint?: string;
+  // Optional prior turns so the server can understand follow-ups in live mode
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>;
 };
 
 export type Answer = {
@@ -325,7 +327,8 @@ export async function sendChat(p: ChatPayload): Promise<Answer> {
     message: p.message,
     router:   { domain: p.router?.domain },
     template: { id: p.template?.id },
-    params:   p.params ?? {}
+    params:   p.params ?? {},
+    history:  p.history ?? []
   };
   console.info('[SUBMIT]', { body, endpoint });
   const res = await fetch(endpoint, {
