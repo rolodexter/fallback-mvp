@@ -50,7 +50,8 @@ const readSqlTemplate = (templateId: string): string => {
     const sqlPath = path.join(basePath, 'sql', `${templateId}.sql`);
     return fs.readFileSync(sqlPath, 'utf8');
   } catch (error) {
-    throw new Error(`Failed to read SQL template ${templateId}: ${error.message}`);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to read SQL template ${templateId}: ${errorMessage}`);
   }
 };
 
@@ -90,7 +91,8 @@ const executeBigQuery = async (
       console.log(`Cache hit for ${templateId}`);
       return {
         success: true,
-        rows: cachedResult,
+        rows: Array.isArray(cachedResult) ? cachedResult : [],
+        source: 'bq',
         diagnostics: {
           template_id: templateId,
           params,
@@ -109,19 +111,20 @@ const executeBigQuery = async (
     
     // Add query options with limits
     const startTime = Date.now();
-    const [rows, metadata] = await bigquery.query({ 
+    // Execute query with proper typing
+    const [rows, metadata] = await (bigquery.query({ 
       query: sqlQuery,
       maximumBytesBilled: '1073741824', // 1 GB limit
-      timeoutMs: 15000 // 15 second timeout
-    });
+      jobTimeoutMs: 15000 // 15 second timeout
+    }) as Promise<[any[], any]>);
     const executionTime = Date.now() - startTime;
     
     // Get statistics if available
-    const bytesProcessed = metadata?.statistics?.totalBytesProcessed || 0;
-    const jobId = metadata?.statistics?.jobId || '';
+    const bytesProcessed = Number(metadata?.statistics?.totalBytesProcessed || 0);
+    const jobId = String(metadata?.statistics?.jobId || '');
     
     // Store in cache (default TTL is 900 seconds / 15 minutes)
-    await cache.set(cacheKey, rows);
+    await cache.set(cacheKey, JSON.stringify(rows), 900);
     
     return {
       success: true,
@@ -140,15 +143,16 @@ const executeBigQuery = async (
     };
   } catch (error) {
     console.error(`BigQuery execution error:`, error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return {
       success: false,
       rows: [],
+      source: 'bq',
       diagnostics: {
         message: 'Failed to execute BigQuery',
-        error: error.message,
+        error: errorMessage,
         template_id: templateId,
         params,
-        // Add flag to indicate if mock fallback should be allowed
         allow_mock_fallback: allowMockFallback
       }
     };
@@ -156,7 +160,7 @@ const executeBigQuery = async (
 };
 
 // Netlify function handler
-const handler: Handler = async (event, context) => {
+const handler: Handler = async (event) => {
   // Enable CORS
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -178,9 +182,7 @@ const handler: Handler = async (event, context) => {
     const body: BigQueryRequest = JSON.parse(event.body || '{}');
     const { template_id, params = {} } = body;
     
-    // Check if we're in live mode with mock fallback disabled
-    const dataMode = String(process.env.DATA_MODE || 'mock').toLowerCase();
-    const isLiveMode = dataMode === 'live' || dataMode === 'bq';
+    // Note: DATA_MODE is handled in the executeBigQuery function, not needed here
     
     if (!template_id) {
       return {
@@ -215,6 +217,7 @@ const handler: Handler = async (event, context) => {
       body: JSON.stringify(result)
     };
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return {
       statusCode: 500,
       headers,
@@ -222,7 +225,7 @@ const handler: Handler = async (event, context) => {
         success: false,
         diagnostics: {
           message: 'Server error',
-          error: error.message
+          error: errorMessage
         }
       })
     };
