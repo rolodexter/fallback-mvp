@@ -3,7 +3,7 @@
   publish = "dist"
   functions = "netlify/functions"
 
-[# Explicit functions configuration]
+# Explicit functions configuration
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
