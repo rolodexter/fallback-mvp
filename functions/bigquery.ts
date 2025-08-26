@@ -10,8 +10,30 @@ const bigquery = new BigQuery();
 // Check data mode: 'bq' or 'mock'
 const dataMode = (process.env.DATA_MODE || 'mock').toLowerCase();
 
-// Check if mock fallback is allowed when BQ fails
-const allowMockFallback = String(process.env.ALLOW_MOCK_FALLBACK || 'true').toLowerCase() !== 'false';
+// Mock data fallback is now deprecated
+// We'll always return clear errors when data is unavailable instead of showing mock data
+const allowMockFallback = false;
+
+// Define allowed templates with optional parameter validation
+const ALLOWED_TEMPLATES = [
+  'metric_snapshot_year_v1',
+  'metric_timeseries_v1',
+  'monthly_gross_trend_v1',
+  'business_units_list_v1',
+  'business_units_snapshot_yoy_v1',
+  'top_counterparties_gross_v1',
+  'customers_top_n',
+  'metric_breakdown_by_unit_v1',
+  'business_risk_assessment_v1'
+];
+
+// Define available data ranges
+const DATA_AVAILABILITY = {
+  yearStart: 2020, // Earliest year with available data
+  yearEnd: new Date().getFullYear() - 1, // Last complete year
+  monthStart: 1, // First month with available data (1-indexed)
+  monthEnd: new Date().getMonth(), // Current month (0-indexed, so adding 1 later)
+};
 
 interface BigQueryRequest {
   template_id: string;
@@ -147,16 +169,25 @@ const executeBigQuery = async (
   } catch (error) {
     console.error(`BigQuery execution error:`, error);
     const errorMessage = error instanceof Error ? error.message : String(error);
+    
+    // Check if the error message indicates a data availability issue
+    const isDataRangeError = 
+      errorMessage.includes('no data') || 
+      errorMessage.includes('out of range') || 
+      errorMessage.includes('not found');
+    
     return {
       success: false,
       rows: [],
       source: 'bq',
       diagnostics: {
-        message: 'Failed to execute BigQuery',
+        message: isDataRangeError ? 
+          `The requested data is not available. Available data ranges from ${DATA_AVAILABILITY.yearStart} to ${DATA_AVAILABILITY.yearEnd}.` : 
+          'Failed to execute BigQuery query',
         error: errorMessage,
         template_id: templateId,
         params,
-        allow_mock_fallback: allowMockFallback
+        allow_mock_fallback: false // Never fall back to mock data
       }
     };
   }
@@ -206,7 +237,51 @@ const handler: Handler = async (event) => {
       // Default to current year - 1 to ensure complete data
       params.year = new Date().getFullYear() - 1;
     }
-    
+
+    // Validate that requested year is within available data range
+    const requestedYear = Number(params.year);
+    if (isNaN(requestedYear) || requestedYear < DATA_AVAILABILITY.yearStart || requestedYear > DATA_AVAILABILITY.yearEnd) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          success: false,
+          source: 'bq',
+          diagnostics: {
+            message: `Data for year ${params.year} is not available. Available data ranges from ${DATA_AVAILABILITY.yearStart} to ${DATA_AVAILABILITY.yearEnd}.`,
+            template_id,
+            params
+          }
+        })
+      };
+    }
+
+    // If period parameter is present, validate it's within available range
+    if (params.period && params.period.toLowerCase().includes('month')) {
+      const monthMatch = params.period.match(/(\d+)/);
+      if (monthMatch) {
+        const requestedMonth = parseInt(monthMatch[1], 10);
+        const currentYear = new Date().getFullYear();
+        
+        // For current year, check month availability
+        if (requestedYear === currentYear && requestedMonth > DATA_AVAILABILITY.monthEnd + 1) {
+          return {
+            statusCode: 400,
+            headers,
+            body: JSON.stringify({
+              success: false,
+              source: 'bq',
+              diagnostics: {
+                message: `Data for ${params.period} ${requestedYear} is not available yet. For ${requestedYear}, data is only available through month ${DATA_AVAILABILITY.monthEnd + 1}.`,
+                template_id,
+                params
+              }
+            })
+          };
+        }
+      }
+    }
+
     // Set default limit for customers query if not provided
     if (template_id === 'customers_top_n' && !params.limit) {
       params.limit = 5;
@@ -214,22 +289,43 @@ const handler: Handler = async (event) => {
     
     let result: BigQueryResponse;
     
-    // If we're in mock mode, immediately return mock response
+    // If we're in mock mode, return error indicating mock data is not available
+    // Executives should be informed that we don't have the data rather than seeing mock data
     if (useMockData) {
-      // Return mock data with indicator
-      result = {
-        success: true,
-        rows: [], // Mock data will be handled on client side
-        source: 'mock',
-        diagnostics: {
-          message: 'Using mock data as configured by DATA_MODE',
-          template_id,
-          params
-        }
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          success: false,
+          source: 'bq', // We say 'bq' to indicate this is coming from the data source system
+          diagnostics: {
+            message: 'Mock data mode is deprecated. Please use live data or contact the data team to verify data availability.',
+            template_id,
+            params
+          }
+        })
       };
     } else {
       // Execute real BigQuery
       result = await executeBigQuery(template_id, params);
+      
+      // If BigQuery failed and returned no data, provide clear messaging
+      if (!result.success || (result.rows && result.rows.length === 0)) {
+        return {
+          statusCode: 404, // Use 404 to indicate data not found
+          headers,
+          body: JSON.stringify({
+            success: false,
+            source: 'bq',
+            diagnostics: {
+              message: `No data available for this query. Please verify the requested parameters are valid and within available data ranges (${DATA_AVAILABILITY.yearStart}-${DATA_AVAILABILITY.yearEnd}).`,
+              template_id,
+              params,
+              error: result.diagnostics?.error || 'No matching data found'
+            }
+          })
+        };
+      }
     }
     
     return {

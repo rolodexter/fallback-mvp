@@ -225,6 +225,28 @@ export function routeMessage(msg: string): RouteHit {
   if (m.includes("profitability") || m.includes("margin")) {
     return { domain: "profitability", template_id: "profitability_summary_v1", params: {} };
   }
+  
+  // Business risk assessment and weakness queries - common in executive questions
+  const RISK_WEAKNESS_PAT = /\b(risk|risks|weak|weakness|weaknesses|threat|threats|concern|concerns|problem|problems|issue|issues|challenge|challenges|struggling|underperform|exposure|vulnerabilit|opportunit)\b/i;
+  if (RISK_WEAKNESS_PAT.test(m) && (m.includes("business") || m.includes("company") || m.includes("organization") || m.includes("enterprise"))) {
+    // Route to our specialized business risk assessment template
+    // This provides a multi-metric view focusing on underperforming areas
+    return { 
+      domain: "risk", 
+      template_id: "business_risk_assessment_v1", 
+      params: { 
+        year: new Date().getFullYear() - 1,
+        limit: 10 // Show top 10 risk areas by default
+      } 
+    };
+  }
+  
+  // More general open-ended strategic questions
+  const STRATEGIC_PAT = /\b(where|what|how)\b.*\b(start|focus|prioritize|attention|look|address)\b/i;
+  if (STRATEGIC_PAT.test(m) && !RISK_WEAKNESS_PAT.test(m)) {
+    // Default to business units overview for open-ended strategic questions
+    return { domain: "business_units", template_id: "business_units_list_v1", params: { includePerformance: true } };
+  }
 
   return {}; // Intro/nodata
 }
