@@ -14,6 +14,18 @@ type DataMode = 'mock' | 'live';
 
 // No dotenv in serverless functions; rely on platform env
 
+// Helpers to detect list widgets robustly (supports `type` or `kind`)
+function isListWidget(w: any): boolean {
+  const t = String((w?.type ?? w?.kind ?? '')).toLowerCase();
+  return t === 'list';
+}
+function isListOnly(widgets: unknown): boolean {
+  if (!widgets) return false;
+  const arr = Array.isArray(widgets) ? widgets : [widgets];
+  if (arr.length === 0) return false;
+  return arr.every(isListWidget);
+}
+
 type ChatRequest = {
   message: string;
   history: Array<{role: "user" | "assistant", content: string}>;
@@ -321,6 +333,8 @@ const handler: Handler = async (event) => {
     let systemPrompt = '';
     let responseText = '';
     let widgets = null;
+    let kpisOut: any[] = [];
+    let provenanceTag: string | undefined;
     
     // For template/mock data mode, we can use the template output directly
     if (templateOutput) {
@@ -340,23 +354,44 @@ const handler: Handler = async (event) => {
 
       // In mock mode or when using templates directly, we can use the template output directly
       if (dataMode === 'mock') {
+        // Normalize KPIs array from template output (if present)
+        try {
+          const tk = (templateOutput as any)?.kpis;
+          kpisOut = Array.isArray(tk) ? tk : (tk ? [tk] : []);
+        } catch {}
+
+        // Decide if we should polish based on list-only gating and env flags
+        const listOnly = isListOnly(widgets);
+        const hasKpis = kpisOut.length > 0;
+        const llmModeOn = process.env.NARRATIVE_MODE === 'llm';
+        const polishEnvOn = String(process.env.POLISH_NARRATIVE ?? 'true').toLowerCase() !== 'false';
+        let polishAllowed = llmModeOn && polishEnvOn && !!process.env.PERPLEXITY_API_KEY;
+        if (listOnly && !hasKpis) polishAllowed = false;
+
+        // Keep concise one-liner if list-only and no text
+        if (!templateText && listOnly) {
+          templateText = 'Here are the items you asked for.';
+        }
+
         responseText = templateText;
-        
-        // Optionally polish the narrative if needed
-        if (process.env.POLISH_NARRATIVE === 'true' && templateText) {
+
+        // Optionally polish the narrative if allowed
+        if (polishAllowed && templateText) {
           try {
             const polishingPrompt = `Rewrite this text for clarity. Do not change numbers, KPIs, or fields. Here's the text:\n\n${templateText}`;
             const polishedText = await callLLMProvider(polishingPrompt, 'You are an editor helping to improve text clarity while preserving all facts and figures exactly as provided.', []);
-            
             if (polishedText) {
               responseText = polishedText;
+              provenanceTag = 'POLISH_APPLIED';
               console.log('Narrative polished successfully');
             }
           } catch (err) {
             console.warn('Failed to polish narrative, using template text directly:', err);
-            // Fall back to template text
             responseText = templateText;
+            provenanceTag = 'POLISH_SKIPPED_ERROR';
           }
+        } else {
+          provenanceTag = listOnly ? 'POLISH_SKIPPED_LIST_ONLY' : 'POLISH_SKIPPED_OFF';
         }
       } else {
         // In live mode, use the template output to guide the LLM
@@ -408,6 +443,7 @@ BIGQUERY DATA:\n${resultsText}`;
         text: responseText,
         mode: 'strict',  // Default to strict mode for mock/template data
         widgets: widgets,
+        kpis: kpisOut,
         meta: {
           domain,
           confidence: routeResult.confidence,
@@ -419,7 +455,7 @@ BIGQUERY DATA:\n${resultsText}`;
           source: dataMode,
           platform: 'netlify',
           fn_dir: 'netlify/functions',
-          tag: fallbackGreetingApplied ? 'SERVER_FALLBACK_GREETING' : undefined,
+          tag: provenanceTag || (fallbackGreetingApplied ? 'SERVER_FALLBACK_GREETING' : undefined),
           domain: det?.domain,
           template: domainTemplate,
           state: { params, detail }
