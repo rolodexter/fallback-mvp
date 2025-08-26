@@ -25,6 +25,13 @@ type ChatRequest = {
   };
   template?: string | { id?: string };
   params?: Record<string, any>;
+  client_hints?: {
+    prevDomain?: string | null;
+    prevTemplate?: string | null;
+    prevParams?: Record<string, any> | null;
+    prevTop?: number | null;
+    prevDetail?: number | null;
+  };
 };
 
 /**
@@ -131,6 +138,7 @@ const handler: Handler = async (event) => {
     const incomingRouter = body.router || {};
     const incomingParams = body.params || {};
     const templateIdFromBody = typeof body.template === 'string' ? body.template : (body.template && (body.template as any).id);
+    const clientHints = body.client_hints || {};
     
     if (!message) {
       return {
@@ -174,11 +182,34 @@ const handler: Handler = async (event) => {
       fallbackGreetingApplied = true;
     }
 
+    // Stateless follow-up folding using client hints when no deterministic route/template was found
+    let usedClientHints = false;
+    if ((!det || !det.template_id) && clientHints?.prevDomain && clientHints?.prevTemplate) {
+      det = {
+        domain: clientHints.prevDomain,
+        template_id: clientHints.prevTemplate,
+        params: { ...(clientHints.prevParams || {}) }
+      };
+      usedClientHints = true;
+    }
+
     // Resolve the template key preference order: explicit templateId -> deterministic route -> domain
     let domainTemplate: string | undefined = (templateIdFromBody as string) || det.template_id || (routeResult.domain && routeResult.domain !== 'none' ? routeResult.domain : undefined);
 
-    // Merge params from deterministic route and incoming body
-    let params: Record<string, any> = { ...(det.params || {}), ...(incomingParams || {}) };
+    // Merge params in increasing precedence: hints -> deterministic -> body
+    let params: Record<string, any> = { ...(clientHints?.prevParams || {}), ...(det.params || {}), ...(incomingParams || {}) };
+
+    // Carry detail knob from hints if provided (client may bump on follow-ups)
+    const detail: number | undefined = (typeof clientHints?.prevDetail === 'number') ? clientHints.prevDetail as number : undefined;
+
+    // Slot-fill safe defaults (example: latest complete year when template implies year granularity)
+    const defaults_used: Record<string, any> = {};
+    const now = new Date();
+    const latestCompleteYear = now.getFullYear() - 1;
+    if (params && typeof params.year === 'undefined' && typeof domainTemplate === 'string' && /_year_/.test(domainTemplate)) {
+      params.year = latestCompleteYear;
+      defaults_used.year = latestCompleteYear;
+    }
     
     // Safety check - return nodata only if no deterministic/explicit template resolved
     if (!domainTemplate && ((routeResult.domain === 'none') || (typeof routeResult.confidence === 'number' && routeResult.confidence < 0.3))) {
@@ -380,7 +411,8 @@ BIGQUERY DATA:\n${resultsText}`;
         meta: {
           domain,
           confidence: routeResult.confidence,
-          groundingType: (fallbackGreetingApplied ? 'fallback_greeting' : groundingType)
+          groundingType: (fallbackGreetingApplied ? 'fallback_greeting' : (usedClientHints ? 'followup' : groundingType)),
+          ...(Object.keys(defaults_used).length ? { defaults_used } : {})
         },
         provenance: {
           template_id: domainTemplate,
@@ -389,7 +421,8 @@ BIGQUERY DATA:\n${resultsText}`;
           fn_dir: 'netlify/functions',
           tag: fallbackGreetingApplied ? 'SERVER_FALLBACK_GREETING' : undefined,
           domain: det?.domain,
-          template: domainTemplate
+          template: domainTemplate,
+          state: { params, detail }
         }
       })
     };
