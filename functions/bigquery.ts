@@ -7,6 +7,9 @@ import { getCache, generateStableHash } from '../src/lib/cache';
 // Initialize BigQuery client
 const bigquery = new BigQuery();
 
+// Check if mock fallback is allowed when BQ fails
+const allowMockFallback = String(process.env.ALLOW_MOCK_FALLBACK || 'true').toLowerCase() !== 'false';
+
 interface BigQueryRequest {
   template_id: string;
   params?: Record<string, any>;
@@ -140,7 +143,9 @@ const executeBigQuery = async (
         message: 'Failed to execute BigQuery',
         error: error.message,
         template_id: templateId,
-        params
+        params,
+        // Add flag to indicate if mock fallback should be allowed
+        allow_mock_fallback: allowMockFallback
       }
     };
   }
@@ -168,6 +173,10 @@ const handler: Handler = async (event, context) => {
     // Parse request body
     const body: BigQueryRequest = JSON.parse(event.body || '{}');
     const { template_id, params = {} } = body;
+    
+    // Check if we're in live mode with mock fallback disabled
+    const dataMode = String(process.env.DATA_MODE || 'mock').toLowerCase();
+    const isLiveMode = dataMode === 'live' || dataMode === 'bq';
     
     if (!template_id) {
       return {

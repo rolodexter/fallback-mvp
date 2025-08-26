@@ -31,6 +31,28 @@
   color: #4a5568;
 }
 
+.data-mode-badge {
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-left: 12px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.mock-data-badge {
+  background-color: #ffe9d9;
+  color: #c05621;
+  border: 1px solid #fed7aa;
+}
+
+.live-data-badge {
+  background-color: #d9f7e9;
+  color: #2c7a7b;
+  border: 1px solid #9ae6b4;
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;

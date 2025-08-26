@@ -149,9 +149,10 @@ const handler: Handler = async (event) => {
   }
   
   // Check which data mode we're in (mock or live). Default to mock for Stage-A.
-  const dataMode: DataMode = (String(process.env.DATA_MODE || 'mock') === 'mock' ? 'mock' : 'live');
+  const dataMode: DataMode = (String(process.env.DATA_MODE || 'mock').toLowerCase() === 'mock' ? 'mock' : 'live');
   const polishing = String(process.env.POLISH_NARRATIVE || 'false').toLowerCase() === 'true';
-  console.log(`[Netlify] Using data mode: ${dataMode} | polishing=${polishing}`);
+  const allowMockFallback = String(process.env.ALLOW_MOCK_FALLBACK || 'true').toLowerCase() !== 'false';
+  console.log(`[Netlify] Using data mode: ${dataMode} | polishing=${polishing} | allowMockFallback=${allowMockFallback}`);
   
   // Check for required environment variables (relaxed in mock unless polishing)
   const requiredEnvVars: string[] = [];
@@ -479,8 +480,8 @@ const handler: Handler = async (event) => {
       }
     }
     
-    // If we're in mock mode or don't have BigQuery data yet, try template
-    if ((dataMode === 'mock' || dataMode === 'live') && !groundingData && domainTemplate && (typeof routeResult.confidence !== 'number' || routeResult.confidence >= 0.3)) {
+    // If we're in mock mode or (live mode with mock fallback allowed), try template
+    if (((dataMode === 'live' && allowMockFallback) || dataMode === 'mock') && !groundingData && domainTemplate && (typeof routeResult.confidence !== 'number' || routeResult.confidence >= 0.3)) {
       try {
         console.info(`[Netlify] Generating grounding data (fallback) for: ${domainTemplate}`);
         const templateData = await runTemplate(domainTemplate, params ?? null);
@@ -504,6 +505,23 @@ const handler: Handler = async (event) => {
     
     // If we still don't have grounding data, return abstain response
     if (!groundingData) {
+      // Check if this might be a user protesting about mock data
+      const isMockDataProtest = /\b(wrong|incorrect|not correct|not our|not ours|doesn't exist|does not exist|that company|fake|made up|fictional|that's not|invalid|nonexistent|isn't real|is not real|acme|globex|oceanic|seasecure|marinemac)\b/i.test(message.toLowerCase());
+
+      let responseText = 'I don\'t have the data you\'re looking for right now.';
+      let responseReason = 'no_grounding_data';
+      
+      // If it's a protest about mock data, provide clearer explanation
+      if (dataMode === 'mock' && isMockDataProtest) {
+        responseText = 'You\'re viewing demo data with fictional companies. Switch to live BigQuery data by enabling DATA_MODE=bq and configuring BigQuery credentials in your environment variables.';
+        responseReason = 'mock_data_explanation';
+      }
+      // If in live mode with mock fallback disabled
+      else if (dataMode === 'live' && !allowMockFallback) {
+        responseText = 'Live data connection failed and mock fallback is disabled. Please check your BigQuery configuration and ensure your dataset exists.';
+        responseReason = 'live_data_error_no_fallback';
+      }
+
       return {
         statusCode: 200,
         headers: {
@@ -514,8 +532,8 @@ const handler: Handler = async (event) => {
         },
         body: JSON.stringify({
           mode: 'abstain',
-          text: 'I don\'t have the data you\'re looking for right now.',
-          abstain_reason: 'no_grounding_data',
+          text: responseText,
+          abstain_reason: responseReason,
           meta: {
             domain: domainTemplate,
             confidence: routeResult.confidence,
