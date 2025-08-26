@@ -6,7 +6,14 @@ export const UNIT_LABELS: Record<string, string> = {
   Z002: 'Marine Safety',
   Z003: 'Navigation Systems',
   Z004: 'Commercial Vessels',
-  Z005: 'Port Services'
+  Z005: 'Port Services',
+  Z006: 'Maritime Tech',
+  Z007: 'Fleet Management',
+  Z008: 'Offshore Solutions',
+  Z009: 'Vessel Security',
+  Z010: 'Marine Logistics',
+  Z011: 'Nautical Services',
+  Z012: 'Harbor Operations'
 };
 
 /**
