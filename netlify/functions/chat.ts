@@ -282,14 +282,28 @@ const handler: Handler = async (event) => {
     
     // For template/mock data mode, we can use the template output directly
     if (templateOutput) {
+      // Normalize template output to string and carry widgets through
+      let templateText = typeof templateOutput === 'string'
+        ? templateOutput
+        : (templateOutput && typeof templateOutput === 'object'
+            ? (templateOutput as any).text
+            : '');
+      if ((!templateText || typeof templateText !== 'string') && templateOutput) {
+        try { templateText = JSON.stringify(templateOutput); } catch { templateText = String(templateOutput); }
+      }
+      try {
+        const tw = (templateOutput as any)?.widgets;
+        if (tw && !widgets) { widgets = tw; }
+      } catch {}
+
       // In mock mode or when using templates directly, we can use the template output directly
       if (dataMode === 'mock') {
-        responseText = templateOutput;
+        responseText = templateText;
         
         // Optionally polish the narrative if needed
-        if (process.env.POLISH_NARRATIVE === 'true') {
+        if (process.env.POLISH_NARRATIVE === 'true' && templateText) {
           try {
-            const polishingPrompt = `Rewrite this text for clarity. Do not change numbers, KPIs, or fields. Here's the text:\n\n${templateOutput}`;
+            const polishingPrompt = `Rewrite this text for clarity. Do not change numbers, KPIs, or fields. Here's the text:\n\n${templateText}`;
             const polishedText = await callLLMProvider(polishingPrompt, 'You are an editor helping to improve text clarity while preserving all facts and figures exactly as provided.', []);
             
             if (polishedText) {
@@ -298,15 +312,15 @@ const handler: Handler = async (event) => {
             }
           } catch (err) {
             console.warn('Failed to polish narrative, using template text directly:', err);
-            // Fall back to template output
-            responseText = templateOutput;
+            // Fall back to template text
+            responseText = templateText;
           }
         }
       } else {
         // In live mode, use the template output to guide the LLM
         systemPrompt = `You are Riskill, a financial data analysis assistant. Answer the question using ONLY the data and text provided below. If you cannot answer the question with the provided data, say "I don't have that information available." DO NOT make up any data or statistics that are not provided.\n
 KPI SUMMARY:\n${kpiSummary || 'No KPI summary available.'}\n
-TEMPLATE OUTPUT:\n${templateOutput}`;
+TEMPLATE OUTPUT:\n${templateText}`;
         
         // Call LLM provider
         responseText = await callLLMProvider(message, systemPrompt, history || []);
