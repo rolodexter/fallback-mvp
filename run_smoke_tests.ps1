@@ -1,13 +1,20 @@
-# Run smoke tests against the deployed Vercel endpoint
+param(
+  [string]$SiteUrl
+)
 
-# Set the environment variable to point to your deployed endpoint
-# Replace with your actual Vercel site URL
-$env:CHAT_ENDPOINT="https://fallback-mvp.vercel.app/api/chat"
+# Run smoke tests against the deployed endpoint
+# Priority: explicit CHAT_ENDPOINT env -> parameter SiteUrl -> placeholder
+if (-not $env:CHAT_ENDPOINT) {
+  if ($SiteUrl) {
+    $env:CHAT_ENDPOINT = ("$SiteUrl".TrimEnd('/')) + "/api/chat"
+  } else {
+    # Replace with your actual Netlify site URL if not set
+    $env:CHAT_ENDPOINT = "https://your-site.netlify.app/api/chat"
+  }
+}
 
-# Run the smoke tests
 Write-Host "Running smoke tests against $env:CHAT_ENDPOINT"
 node reports\STAGE_A_MOCK_20250823\smoke_test.js
 
-# Results will be written to reports\STAGE_A_MOCK_20250823\05_SMOKE_RESULTS.md
 Write-Host "`nSmoke test results have been written to:"
 Write-Host "reports\STAGE_A_MOCK_20250823\05_SMOKE_RESULTS.md"

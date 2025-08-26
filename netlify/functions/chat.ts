@@ -1,8 +1,10 @@
 import { Handler } from '@netlify/functions';
 import { callLLMProvider } from '../../src/services/llmProvider';
 import { GroundingPayload } from '../../src/services/chatClient';
-import { routeMessage } from '../../src/data/router/router';
+import { routeMessage as domainRouteMessage } from '../../src/data/router/router';
+import { routeMessage as topicRouteMessage } from '../../src/data/router/topicRouter';
 import { runTemplate } from '../../src/data/templates';
+import { rewriteMessage } from '../../src/services/semanticRewrite';
 
 // Supported data modes
 type DataMode = 'mock' | 'live';
@@ -14,11 +16,12 @@ type ChatRequest = {
   history: Array<{role: "user" | "assistant", content: string}>;
   grounding?: GroundingPayload;
   router?: {
-    domain: string;
-    confidence: number;
+    domain?: string;
+    confidence?: number;
     [key: string]: any;
   };
-  template?: string;
+  template?: string | { id?: string };
+  params?: Record<string, any>;
 };
 
 /**
@@ -120,7 +123,10 @@ const handler: Handler = async (event) => {
   try {
     // Parse the request body
     const body = JSON.parse(event.body || '{}') as ChatRequest;
-    const { message, history, grounding, router, template } = body;
+    const { message, history, grounding } = body;
+    const incomingRouter = body.router || {};
+    const incomingParams = body.params || {};
+    const templateIdFromBody = typeof body.template === 'string' ? body.template : (body.template && (body.template as any).id);
     
     if (!message) {
       return {
@@ -139,12 +145,32 @@ const handler: Handler = async (event) => {
       };
     }
     
+    // Semantic rewrite to canonicalize free-form (e.g., aliases -> Z001 June snapshot)
+    let canonicalMsg: string | undefined;
+    try {
+      const rw = await rewriteMessage(message);
+      canonicalMsg = rw?.canonical;
+      if (canonicalMsg) console.info('[rewrite]', { canonical: canonicalMsg, confidence: rw?.confidence });
+    } catch (e) {
+      console.warn('[rewrite] failed', e);
+    }
+
     // Use incoming router context if provided, otherwise perform routing on the server
-    let routeResult = router || routeMessage(message);
-    let domainTemplate = template || (routeResult.domain !== 'none' ? routeResult.domain : undefined);
+    let routeResult = incomingRouter && (incomingRouter.domain || incomingRouter.confidence)
+      ? incomingRouter as { domain?: string; confidence?: number }
+      : (domainRouteMessage(message) as { domain?: string; confidence?: number });
+
+    // Deterministic topic routing from canonical or original message (maps to template_id + params)
+    const det = topicRouteMessage(canonicalMsg || message) as { domain?: string; template_id?: string; params?: Record<string, any> };
+
+    // Resolve the template key preference order: explicit templateId -> deterministic route -> domain
+    let domainTemplate: string | undefined = (templateIdFromBody as string) || det.template_id || (routeResult.domain && routeResult.domain !== 'none' ? routeResult.domain : undefined);
+
+    // Merge params from deterministic route and incoming body
+    let params: Record<string, any> = { ...(det.params || {}), ...(incomingParams || {}) };
     
-    // Safety check - if router returns 'none' domain, return nodata response immediately
-    if (routeResult.domain === 'none' || routeResult.confidence < 0.3) {
+    // Safety check - return nodata only if no deterministic/explicit template resolved
+    if (!domainTemplate && ((routeResult.domain === 'none') || (typeof routeResult.confidence === 'number' && routeResult.confidence < 0.3))) {
       console.info('[Netlify] No domain detected or low confidence, returning nodata response');
       return {
         statusCode: 200,
@@ -160,7 +186,7 @@ const handler: Handler = async (event) => {
           text: 'Try asking about Business Units (YoY), Top Counterparties, or Monthly Gross Trend.',
           meta: {
             domain: null,
-            confidence: routeResult.confidence || 0,
+            confidence: (typeof routeResult.confidence === 'number' ? routeResult.confidence : 0),
             groundingType: null
           },
           provenance: {
@@ -174,14 +200,14 @@ const handler: Handler = async (event) => {
     // Generate grounding data if not provided in request
     let groundingData = grounding;
     
-    if (!groundingData && domainTemplate && routeResult.confidence >= 0.3) {
+    if (!groundingData && domainTemplate && (typeof routeResult.confidence !== 'number' || routeResult.confidence >= 0.3)) {
       try {
-        console.info(`[Netlify] Generating grounding data for domain: ${domainTemplate}`);
-        const templateData = await runTemplate(domainTemplate, null);
+        console.info(`[Netlify] Generating grounding data for: ${domainTemplate}`);
+        const templateData = await runTemplate(domainTemplate, params ?? null);
         
         groundingData = {
-          domain: domainTemplate,
-          confidence: routeResult.confidence,
+          domain: det.domain || (routeResult.domain || ''),
+          confidence: (typeof routeResult.confidence === 'number' ? routeResult.confidence : 0.9),
           kpiSummary: templateData.kpiSummary || null,
           templateOutput: templateData.templateOutput || null,
           groundingType: 'template'
@@ -193,14 +219,14 @@ const handler: Handler = async (event) => {
     }
     
     // If we're in mock mode or don't have BigQuery data yet, try template
-    if ((dataMode === 'mock' || dataMode === 'live') && !groundingData && domainTemplate && routeResult.confidence >= 0.3) {
+    if ((dataMode === 'mock' || dataMode === 'live') && !groundingData && domainTemplate && (typeof routeResult.confidence !== 'number' || routeResult.confidence >= 0.3)) {
       try {
-        console.info(`[Netlify] Generating grounding data for domain: ${domainTemplate}`);
-        const templateData = await runTemplate(domainTemplate, null);
+        console.info(`[Netlify] Generating grounding data (fallback) for: ${domainTemplate}`);
+        const templateData = await runTemplate(domainTemplate, params ?? null);
         
         groundingData = {
-          domain: domainTemplate,
-          confidence: routeResult.confidence,
+          domain: det.domain || (routeResult.domain || ''),
+          confidence: (typeof routeResult.confidence === 'number' ? routeResult.confidence : 0.9),
           kpiSummary: templateData.kpiSummary || null,
           templateOutput: templateData.templateOutput || null,
           groundingType: 'drilldown',

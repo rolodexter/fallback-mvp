@@ -10,6 +10,9 @@ $env:DATA_MODE="mock"
 $env:PROVIDER="perplexity"
 $env:PERPLEXITY_API_KEY="your_api_key_here"  # Replace with your actual API key
 $env:POLISH_NARRATIVE="false"
+# IMPORTANT: Point Windsurf static frontend to your Netlify API base (site URL)
+# Example: https://your-site.netlify.app
+$env:VITE_API_BASE="https://your-site.netlify.app"  # Replace with your actual Netlify site URL
 
 # Install Netlify CLI if needed
 npm i -g netlify-cli
@@ -26,6 +29,7 @@ netlify env:set DATA_MODE mock
 netlify env:set PROVIDER perplexity
 netlify env:set PERPLEXITY_API_KEY your_api_key_here  # Replace with your actual API key
 netlify env:set POLISH_NARRATIVE false
+netlify env:set VITE_API_BASE $env:VITE_API_BASE
 
 # Build the application
 npm ci
