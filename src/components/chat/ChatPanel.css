@@ -9,6 +9,11 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
+/* Expanded reading mode */
+.chat-panel.expanded {
+  height: calc(100vh - 120px);
+}
+
 .chat-header {
   display: flex;
   justify-content: space-between;
@@ -96,6 +101,18 @@
   text-align: right;
 }
 
+/* Simple list widget styling */
+.widget-list {
+  margin-top: 8px;
+  padding-left: 1.25rem; /* 20px */
+  list-style: disc;
+}
+
+.widget-list li {
+  margin: 4px 0;
+  line-height: 1.4;
+}
+
 .loading-indicator {
   display: flex;
   justify-content: center;
@@ -164,6 +181,16 @@
   background-color: #cbd5e0;
   cursor: not-allowed;
   opacity: 0.7;
+}
+
+/* Numeric right-align for table cells */
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Widget rail (exactly one row of 5, horizontal scroll on narrow screens) */
