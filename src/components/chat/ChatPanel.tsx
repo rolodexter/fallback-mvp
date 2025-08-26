@@ -76,6 +76,16 @@ const nf = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 
 const WidgetRenderer: React.FC<{ widget: any }> = ({ widget }) => {
   if (!widget) return null;
+  // List widget: render as bullet list
+  if (widget.type === 'list' && Array.isArray(widget.items)) {
+    return (
+      <ul className="widget-list">
+        {widget.items.map((it: string) => (
+          <li key={it} className="tabular-nums">{it}</li>
+        ))}
+      </ul>
+    );
+  }
   if (widget.type === 'table' && Array.isArray(widget.columns) && Array.isArray(widget.rows)) {
     return (
       <div className="overflow-x-auto">
@@ -91,7 +101,7 @@ const WidgetRenderer: React.FC<{ widget: any }> = ({ widget }) => {
             {widget.rows.map((r: any[], i: number) => (
               <tr key={i}>
                 {r.map((cell, j) => (
-                  <td key={j} className="px-3 py-2 border-t">
+                  <td key={j} className={"px-3 py-2 border-t" + (typeof cell === 'number' ? " num" : "")}>
                     {typeof cell === 'number' ? nf.format(cell) : String(cell ?? '')}
                   </td>
                 ))}
@@ -103,7 +113,10 @@ const WidgetRenderer: React.FC<{ widget: any }> = ({ widget }) => {
     );
   }
   return (
-    <pre className="text-xs whitespace-pre-wrap">{JSON.stringify(widget, null, 2)}</pre>
+    <details className="mt-3">
+      <summary className="text-xs opacity-70 cursor-pointer">Raw widget (dev)</summary>
+      <pre className="text-xs whitespace-pre-wrap opacity-70 overflow-auto mt-2">{JSON.stringify(widget, null, 2)}</pre>
+    </details>
   );
 };
 
@@ -127,6 +140,7 @@ const ChatPanel: React.FC = () => {
   const [templateId, setTemplateId] = useState<string>('');
   const [showDebug, setShowDebug] = useState<boolean>(false);
   const [showProvenance, setShowProvenance] = useState<boolean>(false);
+  const [expanded, setExpanded] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastAnswerRawRef = useRef<any>(null);
   const lastAnswerTextRef = useRef<string>('');
@@ -473,7 +487,7 @@ const ChatPanel: React.FC = () => {
   };
 
   return (
-    <div className="chat-panel">
+    <div className={"chat-panel" + (expanded ? " expanded" : "") }>
       <div className="chat-header">
         <h2>Chat Assistant</h2>
         {import.meta.env.MODE === 'development' && domain && (
@@ -481,6 +495,9 @@ const ChatPanel: React.FC = () => {
         )}
         {/* Lightweight QA tools */}
         <div className="chat-tools">
+          <button className="tool-btn" onClick={() => setExpanded(v => !v)}>
+            {expanded ? 'Collapse' : 'Expand'}
+          </button>
           <label className="prov-toggle">
             <input
               type="checkbox"
