@@ -24,10 +24,6 @@ enum SourceTag {
   CoverageNote = "COVERAGE_NOTE",
 }
 
-function fmt(list: string[]) {
-  return list.length ? list.join(", ") : "None found.";
-}
-
 // Get default page size from env or use fallback
 function getPageSize(): number {
   try {
@@ -42,11 +38,12 @@ function getPageSize(): number {
 
 // Create coverage message based on shown/total counts
 function coverageMessage(shown: number, total: number, factsCount?: number): string {
+  // Start with the main count information
   let msg = `Found ${total} business unit${total !== 1 ? 's' : ''}; showing ${shown}.`;
   
-  // Add optional facts coverage note
+  // Add more detailed facts coverage note
   if (typeof factsCount === 'number' && factsCount < total) {
-    msg += ` Data coverage note: ${total} BUs exist in the catalog; ${factsCount} appear in facts.`;
+    msg = `Found ${total} BUs exist in the catalog; ${factsCount} appear in facts (last 12 complete months). Showing ${shown}.`;
   }
   
   return msg;
@@ -63,10 +60,15 @@ export async function runMock(params: Record<string, any> = {}) {
   const startIndex = pageToken ? parseInt(pageToken, 10) : 0;
   
   // Apply limit and pagination
-  const limit = params.limit ? Math.min(parseInt(String(params.limit), 10), total) : pageSize;
+  // Handle 'all' parameter to show all BUs
+  const limit = params.limit === 'all' ? total : 
+    (params.limit ? Math.min(parseInt(String(params.limit), 10), total) : pageSize);
   const endIndex = Math.min(startIndex + limit, total);
   const units = allUnits.slice(startIndex, endIndex);
   const shown = units.length;
+  
+  // Track if default limit was used
+  const defaultsUsed = params.limit !== 'all' && limit === pageSize ? { limit: pageSize } : undefined;
   
   // Create paging info if there are more results
   let paging: PagingInfo | undefined;
@@ -101,7 +103,10 @@ export async function runMock(params: Record<string, any> = {}) {
       widgets: { type: "list", items: units } 
     },
     kpiSummary,
-    meta: { coverage },
+    meta: { 
+      coverage,
+      defaults_used: defaultsUsed 
+    },
     paging,
     provenance: {
       source: "mock",
@@ -149,10 +154,15 @@ export async function runBQ(params: Record<string, any> = {}) {
     const startIndex = pageToken ? parseInt(pageToken, 10) : 0;
     
     // Apply limit and pagination
-    const limit = params.limit ? Math.min(parseInt(String(params.limit), 10), total) : pageSize;
+    // Handle 'all' parameter to show all BUs
+    const limit = params.limit === 'all' ? total : 
+      (params.limit ? Math.min(parseInt(String(params.limit), 10), total) : pageSize);
     const endIndex = Math.min(startIndex + limit, total);
     const units = allUnits.slice(startIndex, endIndex);
     const shown = units.length;
+    
+    // Track if default limit was used
+    const defaultsUsed = params.limit !== 'all' && limit === pageSize ? { limit: pageSize } : undefined;
     
     // Create paging info if there are more results
     let paging: PagingInfo | undefined;
@@ -175,13 +185,21 @@ export async function runBQ(params: Record<string, any> = {}) {
     };
     
     // Create text with coverage information
-    const text = coverageMessage(shown, total, factsCount);
+    let text = '';
+    if (params.limit === 'all') {
+      text = `Showing all ${total} business units.`;
+    } else {
+      text = coverageMessage(shown, total, factsCount);
+    }
     const kpiSummary: Kpi[] = [{ label: "Units", value: total }];
 
     return {
       templateOutput: { text, widgets: { type: "list", items: units } },
       kpiSummary,
-      meta: { coverage },
+      meta: { 
+        coverage,
+        defaults_used: defaultsUsed 
+      },
       paging,
       provenance: {
         source: "bq",

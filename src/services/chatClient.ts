@@ -136,6 +136,8 @@ export function verifyChatClientConfig() {
 export const chatClient = {
   endpoint: '',
   initialized: false,
+  // Track the last template request for "Show all" functionality
+  lastRequest: null as { domain: string; template_id: string; params: Record<string, any> } | null,
 
   /**
    * Initialize the chat client with the proper platform configuration
@@ -258,7 +260,42 @@ export const chatClient = {
     
     return initResult;
   },
-
+  
+  /**
+   * Send a message to the chat endpoint
+   * @param message The user message to send
+   * @returns A promise that resolves when the message is sent
+   */
+  async sendMessage(message: string) {
+    if (!this.initialized) await this.init();
+    if (!window.handleUserChat) {
+      console.error("handleUserChat is not available");
+      return;
+    }
+    window.handleUserChat(message);
+  },
+  
+  /**
+   * Send a template request directly to the chat endpoint
+   * @param domain The domain for the template
+   * @param template_id The template ID
+   * @param params The template parameters
+   * @returns A promise that resolves when the template request is sent
+   */
+  async sendTemplate(domain: string, template_id: string, params: Record<string, any> = {}) {
+    if (!this.initialized) await this.init();
+    if (!window.handleUserChat) {
+      console.error("handleUserChat is not available");
+      return;
+    }
+    
+    // Store the request for potential reuse (e.g., "Show all")
+    this.lastRequest = { domain, template_id, params };
+    
+    // Format a message that includes template routing information
+    const routerPayload = { domain, template_id, params };
+    window.handleUserChat("", { router: routerPayload });
+  }
 };
 
 // Minimal Stage-A types and sender

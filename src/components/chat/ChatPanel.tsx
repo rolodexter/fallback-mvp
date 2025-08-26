@@ -102,8 +102,24 @@ const WidgetRenderer: React.FC<{ widget: any, meta?: { coverage?: CoverageInfo }
               {meta.coverage.location && ` • ${meta.coverage.location}`}
               {meta.coverage.shown < meta.coverage.total && (
                 <button className="text-blue-600 ml-2 underline"
-                  onClick={() => window.chatClient?.sendMessage("Show all business units")}>
-                  Show all
+                  onClick={() => {
+                    // Re-send the current template request with limit='all' parameter
+                    if (window.chatClient?.lastRequest?.template_id === 'business_units_list_v1') {
+                      const params = {
+                        ...window.chatClient.lastRequest.params,
+                        limit: 'all'
+                      };
+                      window.chatClient.sendTemplate(
+                        window.chatClient.lastRequest.domain,
+                        window.chatClient.lastRequest.template_id,
+                        params
+                      );
+                    } else {
+                      // Fallback to text command if template request not available
+                      window.chatClient?.sendMessage("Show all business units");
+                    }
+                  }}>
+                  Show all ({meta.coverage.total})
                 </button>
               )}
             </span>
