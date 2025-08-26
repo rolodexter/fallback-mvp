@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { sendChat, type Answer, type ChatPayload } from '@/services/chatClient';
+import { sendChat, type Answer, type ChatPayload, chatClient } from '@/services/chatClient';
 import { routeMessage } from '@/data/router/topicRouter';
 import { verifyChatClientConfig } from '../../services/verify';
 import '@/components/widgets/Widget.css';
