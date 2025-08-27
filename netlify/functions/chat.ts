@@ -494,9 +494,19 @@ const handler: Handler = async (event) => {
         'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
       },
       body: JSON.stringify({ 
-        mode: 'nodata',
-    
-    if (!message) {
+        mode: 'no_data',
+        text: 'Missing message parameter',
+        widgets: [],
+        meta: { groundingType: 'error' },
+        provenance: { source: 'error', tag: 'MISSING_MESSAGE' }
+      })
+    };
+  }
+
+  const requestBody = event.body ? JSON.parse(event.body) : {};
+  const message = requestBody.message;
+  
+  if (!message) {
       return {
         statusCode: 400,
         headers: {
