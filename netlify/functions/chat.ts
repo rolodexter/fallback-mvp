@@ -1,14 +1,14 @@
 import { Handler } from '@netlify/functions';
-import { callLLMProvider, LLMStage } from '../../src/services/llmProvider';
-import { GroundingPayload } from '../../src/services/chatClient';
-import { routeMessage as domainRouteMessage } from '../../src/data/router/router';
-import { routeMessage as topicRouteMessage } from '../../src/data/router/topicRouter';
-import { runTemplate } from '../../src/data/templates';
-import { rewriteMessage } from '../../src/services/semanticRewrite';
-import { enrichBusinessUnitData, synthesizeBuImportanceResponse } from '../../src/services/buEnrichment';
-import { unitLabel } from '../../src/data/labels';
-import { getDataMode, allowMockFallback } from '../../src/lib/dataMode';
-import { makeBQ } from '../../src/lib/bq';
+import { callLLMProvider, LLMStage } from '../../src/services/llmProvider.js';
+import { GroundingPayload } from '../../src/services/chatClient.js';
+import { routeMessage as domainRouteMessage } from '../../src/data/router/router.js';
+import { routeMessage as topicRouteMessage } from '../../src/data/router/topicRouter.js';
+import { runTemplate } from '../../src/data/templates.js';
+import { rewriteMessage } from '../../src/services/semanticRewrite.js';
+import { enrichBusinessUnitData, synthesizeBuImportanceResponse } from '../../src/services/buEnrichment.js';
+import { unitLabel } from '../../src/data/labels.js';
+import { getDataMode, allowMockFallback } from '../../src/lib/dataMode.js';
+import { makeBQ, runBQOrReport } from '../../src/lib/bq.js';
 
 // Broad greeting/help detector used for server-side fallback
 const GREET_RE = /\b(hi|hello|hey|yo|howdy|greetings|good\s+(morning|afternoon|evening)|help|start|get(ting)?\s+started|what\s+can\s+you\s+do)\b/i;
@@ -370,6 +370,7 @@ type ChatRequest = {
  * Handles grounded chat message requests and forwards them to the LLM provider
  */
 const handler: Handler = async (event) => {
+  try {
   console.log('Netlify function called:', event.httpMethod, event.path);
   // CORS preflight
   if (event.httpMethod === 'OPTIONS') {
@@ -391,14 +392,45 @@ const handler: Handler = async (event) => {
   const strictLive = dataMode === 'live' && !allowMockFallback();
   const polishing = String(process.env.POLISH_NARRATIVE || 'false').toLowerCase() === 'true';
   
-  // Initialize BigQuery client
-  const bq = makeBQ();
-  let bqReady: { ok: boolean; error?: string } = { ok: false };
+  // Initialize BigQuery client with improved error handling
+  let bq: ReturnType<typeof makeBQ> | null = null;
+  let bqReady = { ok: false, reason: "UNINIT" };
+  
   try {
-    bqReady = await bq.ready();
-  } catch (e) {
+    bq = makeBQ();                         // uses readServiceAccount()
+    const r = await bq.ready();            // SELECT 1
+    bqReady = { ok: r.ok, reason: r.ok ? "READY" : "BOOT_FAIL" };
+  } catch (e: any) {
     console.error('[ERROR] Failed to initialize BigQuery:', e);
-    bqReady.error = String(e);
+    bqReady = { ok: false, reason: "BOOT_THROW", error: String(e?.message || e) };
+  }
+  
+  // when live and BQ not ready → honest 200/NO_DATA (never throw 502)
+  if (dataMode === "live" && (!bq || !bqReady.ok)) {
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+      },
+      body: JSON.stringify({
+        mode: "no_data",
+        text: "Live data unavailable right now.",
+        widgets: [],
+        meta: { groundingType: "template" },
+        provenance: { 
+          source: "bq", 
+          tag: "BQ_ERROR", 
+          error_code: bqReady.reason,
+          platform: 'netlify',
+          fn_dir: 'netlify/functions',
+          cred_mode: bqReady.reason === "UNINIT" ? "NONE" : "ATTEMPTED",
+          build: process.env.NETLIFY_COMMIT_REF || process.env.VERCEL_GIT_COMMIT_SHA || 'local'
+        }
+      })
+    };
   }
 
   // Log environment and configuration details
@@ -463,39 +495,6 @@ const handler: Handler = async (event) => {
       },
       body: JSON.stringify({ 
         mode: 'nodata',
-        reason: 'invalid_provider',
-        text: 'Service unavailable due to provider configuration issues.',
-        details: `Unsupported provider: ${provider}`,
-        provenance: {
-          platform: 'netlify',
-          fn_dir: 'netlify/functions'
-        }
-      })
-    };
-  }
-
-  // Only allow POST method
-  if (event.httpMethod !== 'POST') {
-    return {
-      statusCode: 405,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
-      },
-      body: JSON.stringify({ error: 'Method not allowed' })
-    };
-  }
-
-  try {
-    // Parse the request body
-    const body = JSON.parse(event.body || '{}') as ChatRequest;
-    const { message, history, grounding } = body;
-    const incomingRouter = body.router || {};
-    const incomingParams = body.params || {};
-    const templateIdFromBody = typeof body.template === 'string' ? body.template : (body.template && (body.template as any).id);
-    const clientHints = body.client_hints || {};
     
     if (!message) {
       return {
@@ -1301,6 +1300,34 @@ BIGQUERY DATA:\n${resultsText}`;
         'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
       },
       body: responseBody
+    };
+  }
+  } catch (e: any) {
+    // 200-always error handling wrapper - never throw 502 errors
+    console.error('[CRITICAL] Unhandled exception in chat handler:', e);
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+      },
+      body: JSON.stringify({
+        mode: 'no_data',
+        text: 'An error occurred processing your request.',
+        widgets: [],
+        meta: { groundingType: 'error' },
+        provenance: { 
+          source: 'error', 
+          tag: 'UNHANDLED_EXCEPTION',
+          error_code: String(e?.code || 'UNKNOWN'),
+          error_message: String(e?.message || e),
+          platform: 'netlify',
+          fn_dir: 'netlify/functions',
+          build: process.env.NETLIFY_COMMIT_REF || process.env.VERCEL_GIT_COMMIT_SHA || 'local'
+        }
+      })
     };
   }
 };
