@@ -17,14 +17,30 @@ if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
     // Try to parse as JSON first
     try {
       credentials = JSON.parse(credJson);
-    } catch {
+      console.log('Credentials parsed directly as JSON');
+    } catch (parseError) {
       // If not valid JSON, try to decode from base64
       try {
+        // Check if it looks like base64 (common pattern for base64 JSON)
+        const isLikelyBase64 = /^[A-Za-z0-9+/=]+$/.test(credJson.trim());
+        if (!isLikelyBase64) {
+          console.error('Credential string doesn\'t appear to be valid base64');
+          throw new Error('Invalid credential format');
+        }
+        
         const decoded = Buffer.from(credJson, 'base64').toString('utf8');
+        // Verify decoded content actually looks like JSON
+        if (!decoded.trim().startsWith('{')) {
+          console.error('Decoded content is not valid JSON', decoded.substring(0, 20) + '...');
+          throw new Error('Decoded credential content is not valid JSON');
+        }
+        
         credentials = JSON.parse(decoded);
-      } catch (e) {
+        console.log('Credentials parsed from base64');
+      } catch (e: any) {
         console.error('Failed to parse credentials from base64:', e);
-        throw new Error('Invalid credentials format');
+        console.error('First 30 chars of input:', credJson.substring(0, 30) + '...');
+        throw new Error(`Invalid credentials format: ${e?.message || 'Unknown error'}`);
       }
     }
     
