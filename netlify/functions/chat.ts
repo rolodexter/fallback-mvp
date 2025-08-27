@@ -1,5 +1,5 @@
 import { Handler } from '@netlify/functions';
-import { callLLMProvider } from '../../src/services/llmProvider';
+import { callLLMProvider, LLMStage } from '../../src/services/llmProvider';
 import { GroundingPayload } from '../../src/services/chatClient';
 import { routeMessage as domainRouteMessage } from '../../src/data/router/router';
 import { routeMessage as topicRouteMessage } from '../../src/data/router/topicRouter';
@@ -14,6 +14,197 @@ import { makeBQ } from '../../src/lib/bq';
 const GREET_RE = /\b(hi|hello|hey|yo|howdy|greetings|good\s+(morning|afternoon|evening)|help|start|get(ting)?\s+started|what\s+can\s+you\s+do)\b/i;
 
 // Using DataMode from dataMode.ts import
+
+/**
+ * Generate a response using multi-step prompting approach with Perplexity
+ * @param message User message
+ * @param systemPrompt System prompt for context
+ * @param data BigQuery data or template output for grounding
+ * @param history Optional conversation history
+ * @param domain Optional domain context
+ * @returns Generated response text
+ */
+async function generateMultiStepResponse(
+  message: string,
+  systemPrompt: string,
+  data: any[] | any | null,
+  history: Array<{role: "user" | "assistant", content: string}> = [],
+  domain?: string | null
+): Promise<string> {
+  console.log('[MultiStep] Starting multi-step response generation');
+  try {
+    // STEP 1: Generate skeleton with placeholders
+    console.log('[MultiStep] Step 1: Generating skeleton with placeholders');
+    const skeleton = await callLLMProvider(message, systemPrompt, history, data, domain, 'skeleton');
+    console.log('[MultiStep] Skeleton generated:', { skeletonLength: skeleton.length });
+    
+    // STEP 2: Fill placeholders with factual data
+    console.log('[MultiStep] Step 2: Filling placeholders with data');
+    const placeholders = extractPlaceholders(skeleton);
+    console.log('[MultiStep] Extracted placeholders:', placeholders);
+    const filledResponse = fillPlaceholders(skeleton, placeholders, data);
+    console.log('[MultiStep] Filled placeholders');
+    
+    // STEP 3: Polish the response with reasoning
+    console.log('[MultiStep] Step 3: Reasoning about data relationships');
+    const reasonedResponse = await callLLMProvider(
+      `Analyze this data-grounded response and identify key business insights: ${filledResponse}`,
+      systemPrompt,
+      history, 
+      data, 
+      domain, 
+      'reasoning'
+    );
+    
+    // STEP 4: Final polish for executive presentation
+    console.log('[MultiStep] Step 4: Final polish for executive presentation');
+    const polishedResponse = await callLLMProvider(
+      `Polish this business analysis for executive clarity: ${reasonedResponse}`,
+      systemPrompt,
+      history,
+      data,
+      domain,
+      'polish'
+    );
+    
+    return polishedResponse;
+  } catch (error) {
+    console.error('[MultiStep] Error in multi-step prompting:', error);
+    
+    // Graceful fallback to single-step if any part of multi-step fails
+    console.log('[MultiStep] Falling back to single-step response');
+    return await callLLMProvider(message, systemPrompt, history, data, domain, 'reasoning');
+  }
+}
+
+/**
+ * Extract placeholder markers from text
+ * @param text Text with placeholders in {{PLACEHOLDER}} format
+ * @returns Array of placeholder names
+ */
+function extractPlaceholders(text: string): string[] {
+  const placeholderRegex = /{{([A-Z_]+)}}/g;
+  const placeholders: string[] = [];
+  let match;
+  
+  while ((match = placeholderRegex.exec(text)) !== null) {
+    placeholders.push(match[1]);
+  }
+  
+  return [...new Set(placeholders)]; // Remove duplicates
+}
+
+/**
+ * Fill placeholders with data from BigQuery results or template output
+ * @param text Text with placeholders to fill
+ * @param placeholders Array of placeholder names to replace
+ * @param data BigQuery data or template output
+ * @returns Text with placeholders filled with actual data
+ */
+function fillPlaceholders(text: string, placeholders: string[], data: any[] | any): string {
+  if (!data) return text;
+  
+  let filledText = text;
+  
+  // Handle array data (BigQuery results)
+  if (Array.isArray(data)) {
+    // For each placeholder, try to find a matching field in the data
+    placeholders.forEach(placeholder => {
+      const placeholderLower = placeholder.toLowerCase();
+      
+      // Look for an exact match in the first data row's keys
+      if (data.length > 0) {
+        const firstRow = data[0];
+        const matchingKey = Object.keys(firstRow).find(key => 
+          key.toLowerCase().includes(placeholderLower) || 
+          placeholderLower.includes(key.toLowerCase())
+        );
+        
+        if (matchingKey && firstRow[matchingKey] !== undefined) {
+          const value = formatPlaceholderValue(firstRow[matchingKey], placeholderLower);
+          filledText = filledText.replace(new RegExp(`{{${placeholder}}}`, 'g'), value);
+        }
+      }
+    });
+  } 
+  // Handle object data (template output)
+  else if (typeof data === 'object') {
+    placeholders.forEach(placeholder => {
+      const placeholderLower = placeholder.toLowerCase();
+      
+      // Try to find keys that match the placeholder
+      const matchingKey = Object.keys(data).find(key => 
+        key.toLowerCase().includes(placeholderLower) || 
+        placeholderLower.includes(key.toLowerCase())
+      );
+      
+      if (matchingKey && data[matchingKey] !== undefined) {
+        const value = formatPlaceholderValue(data[matchingKey], placeholderLower);
+        filledText = filledText.replace(new RegExp(`{{${placeholder}}}`, 'g'), value);
+      }
+    });
+  }
+  
+  // Replace any unfilled placeholders with a marker
+  filledText = filledText.replace(/{{[A-Z_]+}}/g, '[data unavailable]');
+  
+  return filledText;
+}
+
+/**
+ * Format placeholder value based on type and context
+ * @param value The raw value from data
+ * @param context The placeholder context
+ * @returns Formatted value as string
+ */
+function formatPlaceholderValue(value: any, context: string): string {
+  if (value === null || value === undefined) return '[data unavailable]';
+  
+  // Handle numeric values
+  if (typeof value === 'number') {
+    // Currency formatting for monetary values
+    if (context.includes('revenue') || 
+        context.includes('cost') || 
+        context.includes('profit') || 
+        context.includes('sales') ||
+        context.includes('budget')) {
+      // Format as currency with M/B suffix for large values
+      if (value >= 1000000000) {
+        return `€${(value / 1000000000).toFixed(1)}B`;
+      } else if (value >= 1000000) {
+        return `€${(value / 1000000).toFixed(1)}M`;
+      } else if (value >= 1000) {
+        return `€${(value / 1000).toFixed(1)}K`;
+      } else {
+        return `€${value.toFixed(2)}`;
+      }
+    }
+    
+    // Percentage formatting
+    else if (context.includes('rate') || 
+             context.includes('percent') || 
+             context.includes('margin') || 
+             context.includes('growth')) {
+      return `${value.toFixed(1)}%`;
+    }
+    
+    // Default number formatting
+    else if (value === Math.floor(value)) {
+      return value.toString();
+    } else {
+      return value.toFixed(1);
+    }
+  }
+  
+  // Handle date values
+  else if (value instanceof Date || (typeof value === 'string' && !isNaN(Date.parse(value)))) {
+    const date = value instanceof Date ? value : new Date(value);
+    return date.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+  
+  // Default string handling
+  return String(value);
+}
 
 // Extended template result with additional metadata fields
 interface ExtendedTemplateResult {
@@ -904,8 +1095,29 @@ const handler: Handler = async (event) => {
 KPI SUMMARY:\n${kpiSummary || 'No KPI summary available.'}\n
 TEMPLATE OUTPUT:\n${templateText}`;
         
-        // Call LLM provider
-        responseText = await callLLMProvider(message, systemPrompt, history || []);
+        // Call LLM provider using multi-step prompting
+        try {
+          console.log('[chat] Using multi-step prompting with template data');
+          const enableMultiStep = String(process.env.ENABLE_MULTI_STEP || 'true').toLowerCase() === 'true';
+          
+          if (enableMultiStep) {
+            responseText = await generateMultiStepResponse(
+              message,
+              systemPrompt,
+              templateOutput,
+              history || [],
+              domain
+            );
+          } else {
+            // Fallback to single-step if multi-step is disabled
+            responseText = await callLLMProvider(message, systemPrompt, history || [], templateOutput, domain);
+          }
+        } catch (error) {
+          console.error('[chat] Error in LLM processing:', error);
+          // Graceful error handling
+          responseText = `I encountered a technical issue while processing your request. Please try again or contact support if the problem persists.\n\nError details: ${error instanceof Error ? error.message : 'Unknown error'}`;
+          provenanceTag = 'ERROR_LLM_PROCESSING';
+        }
       }
     } else if (bigQueryData) {
       // Format BigQuery results

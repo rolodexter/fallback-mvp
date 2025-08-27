@@ -357,13 +357,73 @@ export async function sendChat(p: ChatPayload): Promise<Answer> {
     client_hints: p.client_hints
   };
   console.info('[SUBMIT]', { body, endpoint });
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) throw new Error(`chatClient: ${res.status}`);
-  const ans = await res.json();
-  console.info('[ANSWER]', ans);
-  return ans as Answer;
+  
+  try {
+    const startTime = Date.now();
+    window.__riskillDebug = window.__riskillDebug || {};
+    window.__riskillDebug.lastRequestEndpoint = endpoint;
+    window.__riskillDebug.lastRequestTime = new Date().toISOString();
+    
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    
+    window.__riskillDebug.lastResponseStatus = res.status;
+    window.__riskillDebug.lastResponseTime = Date.now() - startTime;
+    
+    // Handle non-200 responses
+    if (!res.ok) {
+      console.error(`[ERROR] Server responded with status ${res.status}`);
+      
+      // Try to get error details if possible
+      let errorDetails = "";
+      try {
+        const errorResponse = await res.text();
+        errorDetails = errorResponse || "No additional details available";
+      } catch (e) {
+        // Ignore error parsing errors
+      }
+      
+      window.__riskillDebug.lastError = `Server error ${res.status}: ${errorDetails}`;
+      
+      // Return a graceful error response instead of throwing
+      return {
+        mode: "nodata",
+        text: `I'm currently experiencing connectivity issues with the business data service (Error ${res.status}). Please try again in a moment.`,
+        meta: { domain: null, confidence: 0, groundingType: null },
+        provenance: {
+          source: "error",
+          tag: "SERVER_ERROR",
+          error: `Server returned ${res.status}: ${errorDetails}`
+        },
+        reason: `Server error: ${res.status}`
+      };
+    }
+    
+    const ans = await res.json();
+    console.info('[ANSWER]', ans);
+    return ans as Answer;
+  } catch (error) {
+    // Handle network or parsing errors
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('[CRITICAL] Network or parsing error:', errorMessage);
+    
+    window.__riskillDebug = window.__riskillDebug || {};
+    window.__riskillDebug.lastError = errorMessage;
+    
+    // Return a graceful error response
+    return {
+      mode: "nodata",
+      text: "I'm having trouble connecting to the business data service. Please try again in a moment.",
+      meta: { domain: null, confidence: 0, groundingType: null },
+      provenance: {
+        source: "error",
+        tag: "CLIENT_ERROR",
+        error: errorMessage
+      },
+      reason: `Client error: ${errorMessage}`
+    };
+  }
 }
