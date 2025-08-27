@@ -1012,7 +1012,7 @@ export const handler: Handler = async (event) => {
       responseText = templateText;
       provenanceTag = 'LLM_SKIPPED_ERROR';
     }
-    } else if (bigQueryData) {
+    else if (bigQueryData) {
       // Format BigQuery results for logging purposes
       console.log(`[BigQuery] Processing BigQuery data: ${bigQueryData ? 'found' : 'none'}`);
       // We don't use systemPrompt anymore since we're not calling LLM
