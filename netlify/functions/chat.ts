@@ -1,5 +1,4 @@
 import type { Handler } from '@netlify/functions';
-import { callLLMProvider, LLMStage } from '../../src/services/llmProvider';
 import { GroundingPayload } from '../../src/services/chatClient';
 import { routeMessage as domainRouteMessage } from '../../src/data/router/router';
 import { routeMessage as topicRouteMessage } from '../../src/data/router/topicRouter';
@@ -33,234 +32,9 @@ function missingEnv(keys: string[]) {
   return keys.filter(k => !String(process.env[k] || '').trim());
 }
 
-/**
- * Generate a response using multi-step prompting approach with Perplexity
- * @param message User message
- * @param systemPrompt System prompt for context
- * @param data BigQuery data or template output for grounding
- * @param history Optional conversation history
- * @param domain Optional domain context
- * @returns Generated response text
- */
-async function generateMultiStepResponse(
-  message: string,
-  systemPrompt: string,
-  data: any[] | any | null,
-  history: Array<{role: "user" | "assistant", content: string}> = [],
-  domain?: string | null,
-  stageOverride?: LLMStage
-): Promise<string> {
-  // Generate a unique ID for this multi-step response process for tracing
-  const multiStepId = `ms-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-  console.log(`[MultiStep:${multiStepId}] Starting multi-step response generation`);  
-  console.log(`[MultiStep:${multiStepId}] Message length: ${message.length}, system prompt length: ${systemPrompt.length}`);
-  console.log(`[MultiStep:${multiStepId}] History entries: ${history.length}, domain: ${domain || 'none'}`);
-  
-  // Log data type and size for debugging
-  if (data === null) {
-    console.log(`[MultiStep:${multiStepId}] Data: null`);
-  } else if (Array.isArray(data)) {
-    console.log(`[MultiStep:${multiStepId}] Data: Array with ${data.length} items`);
-  } else if (typeof data === 'object') {
-    console.log(`[MultiStep:${multiStepId}] Data: Object with ${Object.keys(data).length} keys`);
-  } else {
-    console.log(`[MultiStep:${multiStepId}] Data: ${typeof data}`);
-  }
-  try {
-    // STEP 1: Generate skeleton with placeholders
-    console.log(`[MultiStep:${multiStepId}] Step 1: Generating skeleton with placeholders`);
-    const skeletonStage = stageOverride || 'skeleton';
-    const skeleton = await callLLMProvider(message, systemPrompt, history, data, domain, skeletonStage);
-    console.log(`[MultiStep:${multiStepId}] Skeleton generated:`, { skeletonLength: skeleton.length });
-    
-    // Debug output - first 100 chars of skeleton for validation
-    console.log(`[MultiStep:${multiStepId}] Skeleton preview: ${skeleton.substring(0, 100)}...`);
-    
-    // STEP 2: Fill placeholders with factual data
-    console.log(`[MultiStep:${multiStepId}] Step 2: Filling placeholders with data`);
-    const placeholders = extractPlaceholders(skeleton);
-    console.log(`[MultiStep:${multiStepId}] Extracted ${placeholders.length} placeholders:`, placeholders);
-    const filledResponse = fillSkeletonPlaceholders(skeleton, placeholders, data);
-    console.log(`[MultiStep:${multiStepId}] Placeholders filled successfully`);
-    
-    // Debug output - first 100 chars of filled response
-    console.log(`[MultiStep:${multiStepId}] Filled response preview: ${filledResponse.substring(0, 100)}...`);
-    
-    // STEP 3: Polish the response with reasoning
-    console.log(`[MultiStep:${multiStepId}] Step 3: Reasoning about data relationships`);
-    const reasoningPrompt = `Analyze this data-grounded response and identify key business insights: ${filledResponse.substring(0, 3000)}`; // Limit input size
-    console.log(`[MultiStep:${multiStepId}] Reasoning prompt length: ${reasoningPrompt.length}`);
-    
-    const reasonedResponse = await callLLMProvider(
-      reasoningPrompt,
-      systemPrompt,
-      history, 
-      data, 
-      domain, 
-      'reasoning'
-    );
-    console.log(`[MultiStep:${multiStepId}] Reasoning response generated, length: ${reasonedResponse.length}`);
-    
-    // STEP 4: Final polish for executive presentation
-    console.log(`[MultiStep:${multiStepId}] Step 4: Final polish for executive presentation`);
-    const polishPrompt = `Polish this business analysis for executive clarity: ${reasonedResponse.substring(0, 3000)}`; // Limit input size
-    console.log(`[MultiStep:${multiStepId}] Polish prompt length: ${polishPrompt.length}`);
-    
-    const polishedResponse = await callLLMProvider(
-      polishPrompt,
-      systemPrompt,
-      history,
-      data,
-      domain,
-      'polish'
-    );
-    console.log(`[MultiStep:${multiStepId}] Polish complete, final response length: ${polishedResponse.length}`);
-    console.log(`[MultiStep:${multiStepId}] Final response preview: ${polishedResponse.substring(0, 100)}...`);
-    
-    return polishedResponse;
-  } catch (error) {
-    console.error(`[MultiStep:${multiStepId}] Error in multi-step prompting:`, error);
-    
-    // Graceful fallback to single-step if any part of multi-step fails
-    console.log(`[MultiStep:${multiStepId}] Falling back to single-step response`);
-    const fallbackResponse = await callLLMProvider(message, systemPrompt, history, data, domain, 'reasoning');
-    console.log(`[MultiStep:${multiStepId}] Fallback response generated, length: ${fallbackResponse.length}`);
-    return fallbackResponse;
-  }
-}
-
-/**
- * Extract placeholder markers from text
- * @param text Text with placeholders in {{PLACEHOLDER}} format
- * @returns Array of placeholder names
- */
-function extractPlaceholders(text: string): string[] {
-  const placeholderRegex = /{{([A-Z_]+)}}/g;
-  const placeholders: string[] = [];
-  let match;
-  
-  while ((match = placeholderRegex.exec(text)) !== null) {
-    placeholders.push(match[1]);
-  }
-  
-  return [...new Set(placeholders)]; // Remove duplicates
-}
-
-/**
- * Fill placeholders with data from BigQuery results or template output
- * @param text Text with placeholders to fill
- * @param placeholders Array of placeholder names to replace
- * @param data BigQuery data or template output
- * @returns Text with placeholders filled with actual data
- */
-function fillSkeletonPlaceholders(text: string, placeholders: string[], data: any[] | any): string {
-  if (!data) return text;
-  
-  let filledText = text;
-  
-  // Handle array data (BigQuery results)
-  if (Array.isArray(data)) {
-    // For each placeholder, try to find a matching field in the data
-    placeholders.forEach(placeholder => {
-      const placeholderLower = placeholder.toLowerCase();
-      
-      // Look for an exact match in the first data row's keys
-      if (data.length > 0) {
-        const firstRow = data[0];
-        const matchingKey = Object.keys(firstRow).find(key => 
-          key.toLowerCase().includes(placeholderLower) || 
-          placeholderLower.includes(key.toLowerCase())
-        );
-        
-        if (matchingKey && firstRow[matchingKey] !== undefined) {
-          const value = formatPlaceholderValue(firstRow[matchingKey], placeholderLower);
-          filledText = filledText.replace(new RegExp(`{{${placeholder}}}`, 'g'), value);
-        }
-      }
-    });
-  } 
-  // Handle object data (template output)
-  else if (typeof data === 'object') {
-    placeholders.forEach(placeholder => {
-      const placeholderLower = placeholder.toLowerCase();
-      
-      // Try to find keys that match the placeholder
-      const matchingKey = Object.keys(data).find(key => 
-        key.toLowerCase().includes(placeholderLower) || 
-        placeholderLower.includes(key.toLowerCase())
-      );
-      
-      if (matchingKey && data[matchingKey] !== undefined) {
-        const value = formatPlaceholderValue(data[matchingKey], placeholderLower);
-        filledText = filledText.replace(new RegExp(`{{${placeholder}}}`, 'g'), value);
-      }
-    });
-  }
-  
-  // Replace any unfilled placeholders with a marker
-  filledText = filledText.replace(/{{[A-Z_]+}}/g, '[data unavailable]');
-  
-  return filledText;
-}
-
-/**
- * Format placeholder value based on type and context
- * @param value The raw value from data
- * @param context The placeholder context
- * @returns Formatted value as string
- */
-function formatPlaceholderValue(value: any, context: string): string {
-  if (value === null || value === undefined) return '[data unavailable]';
-  
-  // Handle numeric values
-  if (typeof value === 'number') {
-    // Currency formatting for monetary values
-    if (context.includes('revenue') || 
-        context.includes('cost') || 
-        context.includes('profit') || 
-        context.includes('sales') ||
-        context.includes('budget')) {
-      // Format as currency with M/B suffix for large values
-      if (value >= 1000000000) {
-        return `€${(value / 1000000000).toFixed(1)}B`;
-      } else if (value >= 1000000) {
-        return `€${(value / 1000000).toFixed(1)}M`;
-      } else if (value >= 1000) {
-        return `€${(value / 1000).toFixed(1)}K`;
-      } else {
-        return `€${value.toFixed(2)}`;
-      }
-    }
-    
-    // Percentage formatting
-    else if (context.includes('rate') || 
-             context.includes('percent') || 
-             context.includes('margin') || 
-             context.includes('growth')) {
-      return `${value.toFixed(1)}%`;
-    }
-    
-    // Default number formatting
-    else if (value === Math.floor(value)) {
-      return value.toString();
-    } else {
-      return value.toFixed(1);
-    }
-  }
-  
-  // Handle date values
-  else if (value instanceof Date || (typeof value === 'string' && !isNaN(Date.parse(value)))) {
-    const date = value instanceof Date ? value : new Date(value);
-    return date.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
-  }
-  
-  // Default string handling
-  return String(value);
-}
-
 // Extended template result with additional metadata fields
 interface ExtendedTemplateResult {
-  kpiSummary: any;
+  kpiSummary?: any; // Made optional to fix lint warning
   templateOutput: TemplateOutput | null;
   provenance?: any;
   meta?: { coverage?: any; [key: string]: any };
@@ -387,23 +161,22 @@ type ChatRequest = {
  * Netlify serverless function for chat API
  * Handles grounded chat message requests and forwards them to the LLM provider
  */
-const handler: Handler = async (event) => {
+export const handler: Handler = async (event) => {
   try {
-  console.log('Netlify function called:', event.httpMethod, event.path);
-  // CORS preflight
-  if (event.httpMethod === 'OPTIONS') {
-    return {
-// ... (rest of the code remains the same)
-      statusCode: 204,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
-      },
-      body: ''
-    };
-  }
+    console.log('Netlify function called:', event.httpMethod, event.path);
+    // CORS preflight
+    if (event.httpMethod === 'OPTIONS') {
+      return {
+        statusCode: 204,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+        },
+        body: ''
+      };
+    }
   
   // Get normalized data mode using helper
   const dataMode = getDataMode(); // 'mock' | 'live'
@@ -568,7 +341,8 @@ const handler: Handler = async (event) => {
     : (requestBody.template && typeof requestBody.template === 'object' 
       ? (requestBody.template as any).id 
       : undefined);
-  const history: Array<{role: 'user' | 'assistant'; content: string}> = Array.isArray(requestBody.history) ? (requestBody.history as any) : [];
+  // We don't need history anymore since we've removed LLM calls
+  // const history = Array.isArray(requestBody.history) ? (requestBody.history as any) : [];
   
   if (!message) {
       return {
@@ -1135,13 +909,17 @@ const handler: Handler = async (event) => {
     const domain = groundingData.domain;
     const bigQueryData = groundingData.bigQueryData || null;
     const templateOutput = groundingData.templateOutput || null;
-    const kpiSummary = groundingData.kpiSummary || null;
+    // We don't need kpiSummary directly since we extract it later when needed
+    // const kpiSummary = groundingData.kpiSummary || null;
     let groundingType = groundingData.groundingType;
     
     console.log(`Using domain: ${domain}, Grounding type: ${groundingType}`);
     
-    let systemPrompt = '';
+    // We don't need systemPrompt since we've removed LLM calls
+    // let systemPrompt = '';
     let responseText = '';
+    // Initialize templateText that will be used for fallbacks throughout the function
+    let templateText = '';
     let widgets = null;
     let kpisOut: any[] = [];
     let provenanceTag: string | undefined;
@@ -1149,14 +927,22 @@ const handler: Handler = async (event) => {
     // For template/mock data mode, we can use the template output directly
     if (templateOutput) {
       // Normalize template output to string and carry widgets through
-      let templateText = typeof templateOutput === 'string'
-        ? templateOutput
-        : (templateOutput && typeof templateOutput === 'object'
-            ? (templateOutput as any).text
-            : '');
-      if ((!templateText || typeof templateText !== 'string') && templateOutput) {
-        try { templateText = JSON.stringify(templateOutput); } catch { templateText = String(templateOutput); }
+      if (typeof templateOutput === 'string') {
+        templateText = templateOutput;
+      } else if (templateOutput && typeof templateOutput === 'object') {
+        templateText = (templateOutput as any).text || '';
       }
+      
+      // Fall back to JSON or string conversion if needed
+      if ((!templateText || typeof templateText !== 'string') && templateOutput) {
+        try { 
+          templateText = JSON.stringify(templateOutput); 
+        } catch { 
+          templateText = String(templateOutput); 
+        }
+      }
+      
+      // Extract widgets if available
       try {
         const tw = (templateOutput as any)?.widgets;
         if (tw && !widgets) { widgets = tw; }
@@ -1213,35 +999,41 @@ const handler: Handler = async (event) => {
             responseText = templateText;
             provenanceTag = provenanceTag || 'LLM_SKIPPED_GATE';
           }
+        } catch (error) {
+          console.error('[chat] Error in synthesis gate processing:', error);
+          // On synthesis error, return deterministic template output
+          responseText = templateText;
+          provenanceTag = 'LLM_SYNTHESIS_ERROR';
         }
       } catch (error) {
         console.error('[chat] Error in LLM processing:', error);
         // On synthesis error, return deterministic template output
         responseText = templateText;
         provenanceTag = 'LLM_SKIPPED_ERROR';
-    }
+      }
     } else if (bigQueryData) {
-      // Format BigQuery results
-      const resultsText = JSON.stringify(bigQueryData, null, 2);
-      systemPrompt = `You are Riskill, a financial data analysis assistant. Answer the question using ONLY the data provided below. If you cannot answer the question with the provided data, say "I don't have that information available." DO NOT make up any data or statistics that are not provided.\n
-BIGQUERY DATA:\n${resultsText}`;
+      // Format BigQuery results for logging purposes
+      console.log(`[BigQuery] Processing BigQuery data: ${bigQueryData ? 'found' : 'none'}`);
+      // We don't use systemPrompt anymore since we're not calling LLM
       
-      // Call LLM provider using multi-step prompting
+      // Define fallback text for BigQuery data without template
+      const defaultResponseText = "Here's what I found in our financial database. Please let me know if you need more specific information.";
+      
+      // Process with BigQuery data
       try {
-        console.log('[chat] Using multi-step prompting with BigQuery data');
-        // Use pre-parsed flag
+        console.log('[chat] Processing BigQuery data without template');
+        // Use pre-parsed environment flags
         
         if (ENABLE_MULTI_STEP) {
-          responseText = await generateMultiStepResponse(
-            message,
-            systemPrompt,
-            bigQueryData,
-            history || [],
-            domain
-          );
+          // Use deterministic consultant brief processing
+          console.log('[chat] Using deterministic consultant brief generation for BigQuery data');
+          responseText = defaultResponseText;
+          // Note: Actual consultant brief processing would happen here if we had template output
         } else {
-          // Fallback to single-step if multi-step is disabled
-          responseText = await callLLMProvider(message, systemPrompt, history || [], bigQueryData, domain);
+          // Skip consultant brief if multi-step is disabled
+          console.log('[chat] Using simple BigQuery response (ENABLE_MULTI_STEP is off)');
+          responseText = defaultResponseText;
+          provenanceTag = 'BQ_DIRECT';
         }
       } catch (error) {
         console.error('[chat] Error in LLM processing with BigQuery data:', error);
@@ -1250,14 +1042,15 @@ BIGQUERY DATA:\n${resultsText}`;
         provenanceTag = 'ERROR_LLM_PROCESSING';
       }
     } else {
-      // Generic prompt when no grounding
-      systemPrompt = `You are Riskill, a financial data analysis assistant. Answer questions about financial KPIs and business metrics. If you don't know the answer, say "I don't have that information available." DO NOT make up data.`;
+      // Generic prompt when no grounding - no longer needed since we're not calling LLM
+      // We now use a static fallback response instead
       
-      // Call LLM provider - simplified approach for generic queries without grounding data
+      // Handle generic queries without grounding data
       try {
-        console.log('[chat] Using single-step prompting for generic query');
-        // For generic queries without data, multi-step isn't as useful, so use single-step by default
-        responseText = await callLLMProvider(message, systemPrompt, history || [], null, domain, 'reasoning');
+        console.log('[chat] Using static response for generic query');
+        // For generic queries without data, return a fixed fallback response
+        responseText = "I'm sorry, but I need more specific context to answer your question. Please try asking about a specific business unit, metric, or time period.";
+        provenanceTag = 'STATIC_FALLBACK';
       } catch (error) {
         console.error('[chat] Error in LLM processing generic query:', error);
         // Graceful error handling
@@ -1343,5 +1136,4 @@ BIGQUERY DATA:\n${resultsText}`;
   }
 };
 
-// Export the handler function directly
-export default handler;
+// Handler exported as named export above
