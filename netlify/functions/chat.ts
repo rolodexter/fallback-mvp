@@ -1197,7 +1197,8 @@ TEMPLATE OUTPUT:\n${templateText}`;
         
         // Strict gate: only synthesize when live BigQuery with successful template payload
         try {
-          const enableMultiStep = String(process.env.ENABLE_MULTI_STEP || 'true').toLowerCase() === 'true';
+          const msFlag = String(process.env.ENABLE_MULTI_STEP || 'true').toLowerCase();
+          const enableMultiStep = (msFlag === 'true' || msFlag === '1');
           const liveOk = isLiveRun({ provenance: (groundingData as any)?.provenance } as any);
           const payloadOk = hasPayload(templateOutput as any);
           const gateOk = enableMultiStep && liveOk && payloadOk;
