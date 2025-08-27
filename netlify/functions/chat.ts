@@ -419,7 +419,7 @@ const handler: Handler = async (event) => {
   // Check for required environment variables (relaxed in mock unless polishing)
   const requiredEnvVars: string[] = [];
   if (dataMode === 'live' || polishing) {
-    requiredEnvVars.push('PROVIDER', 'PERPLEXITY_API_KEY');
+    requiredEnvVars.push('LLM_PROVIDER', 'PERPLEXITY_API_KEY');
   }
   if (dataMode === 'live') {
     requiredEnvVars.push('GOOGLE_APPLICATION_CREDENTIALS');
@@ -450,7 +450,7 @@ const handler: Handler = async (event) => {
   }
 
   // Validate provider only when required
-  const provider = process.env.PROVIDER;
+  const provider = process.env.LLM_PROVIDER;
   if ((dataMode === 'live' || polishing) && provider !== 'perplexity') {
     console.error(`[ERROR] Unsupported provider: ${provider}`);
     return {
