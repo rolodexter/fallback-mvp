@@ -36,35 +36,52 @@ export function makeBQ() {
     const credentials = readServiceAccount();
     const client = new BigQuery({ projectId, credentials });
 
-  async function query(sql: string, params: Record<string, any>) {
-    const [job] = await client.createQueryJob({
-      query: sql,
-      location: process.env.BQ_LOCATION || "US",
-      params
-    });
-    const [rows] = await job.getQueryResults();
-    const [meta] = await job.getMetadata();
-    return {
-      rows,
-      jobStats: {
-        bytesProcessed: meta.statistics?.query?.totalBytesProcessed,
-        cacheHit: meta.statistics?.query?.cacheHit,
-        ms: Number(meta.statistics?.endTime) - Number(meta.statistics?.startTime)
+    async function query(sql: string, params: Record<string, any>) {
+      try {
+        const [job] = await client.createQueryJob({
+          query: sql,
+          location: process.env.BQ_LOCATION || "US",
+          params
+        });
+        const [rows] = await job.getQueryResults();
+        const [meta] = await job.getMetadata();
+        return {
+          rows,
+          jobStats: {
+            bytesProcessed: meta.statistics?.query?.totalBytesProcessed,
+            cacheHit: meta.statistics?.query?.cacheHit,
+            ms: Number(meta.statistics?.endTime) - Number(meta.statistics?.startTime),
+            cred_mode,
+            build
+          }
+        };
+      } catch (e: any) {
+        console.error(`[BQ] Query failed: ${e?.message || e}`);
+        throw e; // Let the caller handle this with runBQOrReport
       }
+    }
+
+    async function ready() {
+      try { 
+        const r = await query("SELECT 1 AS ok", {}); 
+        return { ok: !!r.rows?.length, cred_mode, build }; 
+      }
+      catch (e: any) { 
+        return { ok: false, error: String(e?.message || e), cred_mode, build }; 
+      }
+    }
+
+    return { query, ready, cred_mode, build };
+  } catch (e: any) {
+    // Return a non-throwing mock client for graceful degradation
+    console.error(`[BQ] Failed to initialize: ${e?.message || e}`);
+    return {
+      query: async () => ({ rows: [], jobStats: { error: String(e?.message || e), cred_mode, build } }),
+      ready: async () => ({ ok: false, error: String(e?.message || e), cred_mode, build }),
+      cred_mode,
+      build
     };
   }
-
-  async function ready() {
-    try { 
-      const r = await query("SELECT 1 AS ok", {}); 
-      return { ok: !!r.rows?.length }; 
-    }
-    catch (e:any) { 
-      return { ok: false, error: String(e?.message||e) }; 
-    }
-  }
-
-  return { query, ready };
 }
 
 export async function runBQOrReport(bq: ReturnType<typeof makeBQ>, sql: string, params: any) {
