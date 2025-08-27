@@ -508,7 +508,7 @@ const handler: Handler = async (event) => {
   
   if (!message) {
       return {
-        statusCode: 400,
+        statusCode: 200,
         headers: {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*',
@@ -1260,58 +1260,7 @@ BIGQUERY DATA:\n${resultsText}`;
         }
       })
     };
-  } catch (error) {
-    console.error('Chat API error:', error);
-    
-    // Prepare error details with safe string conversion
-    let errorDetails;
-    try {
-      errorDetails = error instanceof Error 
-        ? error.message 
-        : (typeof error === 'string' 
-          ? error 
-          : JSON.stringify(error));
-    } catch (jsonError) {
-      errorDetails = 'Error details could not be serialized';
-      console.error('Failed to stringify error:', jsonError);
-    }
-
-    // Check if the error is specifically a SyntaxError related to JSON parsing
-    let errorType = error instanceof Error ? error.constructor.name : 'UnknownError';
-    let errorResponse = { 
-      mode: 'nodata',
-      reason: 'server_error',
-      text: 'Service unavailable. Please try again later.',
-      error_type: errorType,
-      details: errorDetails,
-      provenance: {
-        platform: 'netlify',
-        fn_dir: 'netlify/functions',
-        tag: 'SERVER_ERROR'
-      }
-    };
-    
-    // Create a safe JSON response
-    let responseBody;
-    try {
-      responseBody = JSON.stringify(errorResponse);
-    } catch (jsonError) {
-      // Ultimate fallback if JSON stringification fails
-      console.error('Failed to stringify error response:', jsonError);
-      responseBody = '{"mode":"nodata","reason":"critical_error","text":"Critical server error occurred.","details":"JSON serialization failure"}'; 
-    }
-    
-    return {
-      statusCode: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
-      },
-      body: responseBody
-    };
-  }
+  // merged into 200-always catch below
   } catch (e: any) {
     // 200-always error handling wrapper - never throw 502 errors
     console.error('[CRITICAL] Unhandled exception in chat handler:', e);
