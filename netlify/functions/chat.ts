@@ -1168,46 +1168,51 @@ const handler: Handler = async (event) => {
         try {
           const tk = (templateOutput as any)?.kpis;
           kpisOut = Array.isArray(tk) ? tk : (tk ? [tk] : []);
-    // Strict gate: only synthesize when live BigQuery with successful template payload
-    try {
-      // Use pre-parsed flag instead of parsing on every request
-      const liveOk = isLiveRun({ provenance: groundingData?.provenance as Provenance });
-      const payloadOk = hasPayload(templateOutput as any);
-      const gateOk = ENABLE_MULTI_STEP && liveOk && payloadOk;
-      console.log('[chat] synthesis gate', { ENABLE_MULTI_STEP, liveOk, payloadOk, gateOk });
-
-      if (gateOk) {
-        // Consultant Brief Implementation
+        } catch (err) {
+          console.warn('Error normalizing KPIs:', err);
+        }
+        
+        // Strict gate: only synthesize when live BigQuery with successful template payload
         try {
-          console.log('[chat] Generating consultant brief');
-          const facts = buildFactsPack(templateOutput, params);
-          const skeleton = draftSkeleton(facts); // Correct call with single parameter
-          let brief = fillBriefPlaceholders(skeleton, facts);
-          
-          // Polishing disabled in this build to avoid provider arity/type mismatch; keep deterministic text.
-          provenanceTag = isListOnly(templateOutput?.widgets) ? 'POLISH_SKIPPED_LIST_ONLY' : 'POLISH_SKIPPED_OFF';
+          // Use pre-parsed flag instead of parsing on every request
+          const liveOk = isLiveRun({ provenance: groundingData?.provenance as Provenance });
+          const payloadOk = hasPayload(templateOutput as any);
+          const gateOk = ENABLE_MULTI_STEP && liveOk && payloadOk;
+          console.log('[chat] synthesis gate', { ENABLE_MULTI_STEP, liveOk, payloadOk, gateOk });
 
-          // Set the response text to our brief
-          responseText = brief;
+          if (gateOk) {
+            // Consultant Brief Implementation
+            try {
+              console.log('[chat] Generating consultant brief');
+              const facts = buildFactsPack(templateOutput, params);
+              const skeleton = draftSkeleton(facts); // Correct call with single parameter
+              let brief = fillBriefPlaceholders(skeleton, facts);
+              
+              // Polishing disabled in this build to avoid provider arity/type mismatch; keep deterministic text.
+              provenanceTag = isListOnly(templateOutput?.widgets) ? 'POLISH_SKIPPED_LIST_ONLY' : 'POLISH_SKIPPED_OFF';
 
-          // Generate drill-down chips
-          const chips = chipsFor(facts, params?.template_id || '');
-          if (chips && chips.length > 0 && templateOutput && typeof templateOutput === 'object') {
-            (templateOutput as any).suggestions = chips;
+              // Set the response text to our brief
+              responseText = brief;
+
+              // Generate drill-down chips
+              const chips = chipsFor(facts, params?.template_id || '');
+              if (chips && chips.length > 0 && templateOutput && typeof templateOutput === 'object') {
+                (templateOutput as any).suggestions = chips;
+              }
+
+              provenanceTag = 'LLM_SYNTHESIS_V1';
+              groundingType = 'synthesis';
+            } catch (error) {
+              console.error('[chat] Error in consultant brief generation:', error);
+              // On synthesis error, return deterministic template output
+              responseText = templateText;
+              provenanceTag = 'LLM_SKIPPED_ERROR';
+            }
+          } else {
+            // Deterministic: return template text unchanged
+            responseText = templateText;
+            provenanceTag = provenanceTag || 'LLM_SKIPPED_GATE';
           }
-
-          provenanceTag = 'LLM_SYNTHESIS_V1';
-          groundingType = 'synthesis';
-      } else {
-        // Deterministic: return template text unchanged
-        responseText = templateText;
-        provenanceTag = provenanceTag || 'LLM_SKIPPED_GATE';
-      }
-        } catch (error) {
-          console.error('[chat] Error in consultant brief generation:', error);
-          // On synthesis error, return deterministic template output
-          responseText = templateText;
-          provenanceTag = 'LLM_SKIPPED_ERROR';
         }
       } catch (error) {
         console.error('[chat] Error in LLM processing:', error);
@@ -1339,4 +1344,4 @@ BIGQUERY DATA:\n${resultsText}`;
 };
 
 // Export the handler function directly
-export { handler };
+export default handler;
