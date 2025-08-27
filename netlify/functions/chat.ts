@@ -29,51 +29,85 @@ async function generateMultiStepResponse(
   systemPrompt: string,
   data: any[] | any | null,
   history: Array<{role: "user" | "assistant", content: string}> = [],
-  domain?: string | null
+  domain?: string | null,
+  stageOverride?: LLMStage
 ): Promise<string> {
-  console.log('[MultiStep] Starting multi-step response generation');
+  // Generate a unique ID for this multi-step response process for tracing
+  const multiStepId = `ms-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  console.log(`[MultiStep:${multiStepId}] Starting multi-step response generation`);  
+  console.log(`[MultiStep:${multiStepId}] Message length: ${message.length}, system prompt length: ${systemPrompt.length}`);
+  console.log(`[MultiStep:${multiStepId}] History entries: ${history.length}, domain: ${domain || 'none'}`);
+  
+  // Log data type and size for debugging
+  if (data === null) {
+    console.log(`[MultiStep:${multiStepId}] Data: null`);
+  } else if (Array.isArray(data)) {
+    console.log(`[MultiStep:${multiStepId}] Data: Array with ${data.length} items`);
+  } else if (typeof data === 'object') {
+    console.log(`[MultiStep:${multiStepId}] Data: Object with ${Object.keys(data).length} keys`);
+  } else {
+    console.log(`[MultiStep:${multiStepId}] Data: ${typeof data}`);
+  }
   try {
     // STEP 1: Generate skeleton with placeholders
-    console.log('[MultiStep] Step 1: Generating skeleton with placeholders');
-    const skeleton = await callLLMProvider(message, systemPrompt, history, data, domain, 'skeleton');
-    console.log('[MultiStep] Skeleton generated:', { skeletonLength: skeleton.length });
+    console.log(`[MultiStep:${multiStepId}] Step 1: Generating skeleton with placeholders`);
+    const skeletonStage = stageOverride || 'skeleton';
+    const skeleton = await callLLMProvider(message, systemPrompt, history, data, domain, skeletonStage);
+    console.log(`[MultiStep:${multiStepId}] Skeleton generated:`, { skeletonLength: skeleton.length });
+    
+    // Debug output - first 100 chars of skeleton for validation
+    console.log(`[MultiStep:${multiStepId}] Skeleton preview: ${skeleton.substring(0, 100)}...`);
     
     // STEP 2: Fill placeholders with factual data
-    console.log('[MultiStep] Step 2: Filling placeholders with data');
+    console.log(`[MultiStep:${multiStepId}] Step 2: Filling placeholders with data`);
     const placeholders = extractPlaceholders(skeleton);
-    console.log('[MultiStep] Extracted placeholders:', placeholders);
+    console.log(`[MultiStep:${multiStepId}] Extracted ${placeholders.length} placeholders:`, placeholders);
     const filledResponse = fillPlaceholders(skeleton, placeholders, data);
-    console.log('[MultiStep] Filled placeholders');
+    console.log(`[MultiStep:${multiStepId}] Placeholders filled successfully`);
+    
+    // Debug output - first 100 chars of filled response
+    console.log(`[MultiStep:${multiStepId}] Filled response preview: ${filledResponse.substring(0, 100)}...`);
     
     // STEP 3: Polish the response with reasoning
-    console.log('[MultiStep] Step 3: Reasoning about data relationships');
+    console.log(`[MultiStep:${multiStepId}] Step 3: Reasoning about data relationships`);
+    const reasoningPrompt = `Analyze this data-grounded response and identify key business insights: ${filledResponse.substring(0, 3000)}`; // Limit input size
+    console.log(`[MultiStep:${multiStepId}] Reasoning prompt length: ${reasoningPrompt.length}`);
+    
     const reasonedResponse = await callLLMProvider(
-      `Analyze this data-grounded response and identify key business insights: ${filledResponse}`,
+      reasoningPrompt,
       systemPrompt,
       history, 
       data, 
       domain, 
       'reasoning'
     );
+    console.log(`[MultiStep:${multiStepId}] Reasoning response generated, length: ${reasonedResponse.length}`);
     
     // STEP 4: Final polish for executive presentation
-    console.log('[MultiStep] Step 4: Final polish for executive presentation');
+    console.log(`[MultiStep:${multiStepId}] Step 4: Final polish for executive presentation`);
+    const polishPrompt = `Polish this business analysis for executive clarity: ${reasonedResponse.substring(0, 3000)}`; // Limit input size
+    console.log(`[MultiStep:${multiStepId}] Polish prompt length: ${polishPrompt.length}`);
+    
     const polishedResponse = await callLLMProvider(
-      `Polish this business analysis for executive clarity: ${reasonedResponse}`,
+      polishPrompt,
       systemPrompt,
       history,
       data,
       domain,
       'polish'
     );
+    console.log(`[MultiStep:${multiStepId}] Polish complete, final response length: ${polishedResponse.length}`);
+    console.log(`[MultiStep:${multiStepId}] Final response preview: ${polishedResponse.substring(0, 100)}...`);
     
     return polishedResponse;
   } catch (error) {
-    console.error('[MultiStep] Error in multi-step prompting:', error);
+    console.error(`[MultiStep:${multiStepId}] Error in multi-step prompting:`, error);
     
     // Graceful fallback to single-step if any part of multi-step fails
-    console.log('[MultiStep] Falling back to single-step response');
-    return await callLLMProvider(message, systemPrompt, history, data, domain, 'reasoning');
+    console.log(`[MultiStep:${multiStepId}] Falling back to single-step response`);
+    const fallbackResponse = await callLLMProvider(message, systemPrompt, history, data, domain, 'reasoning');
+    console.log(`[MultiStep:${multiStepId}] Fallback response generated, length: ${fallbackResponse.length}`);
+    return fallbackResponse;
   }
 }
 
@@ -367,7 +401,12 @@ const handler: Handler = async (event) => {
     bqReady.error = String(e);
   }
 
+  // Log environment and configuration details
   console.log(`[chat] mode=${dataMode} strict=${strictLive} bqReady=${bqReady.ok} raw=${rawDataMode} polishing=${polishing}`);
+  console.log(`[chat] Multi-step prompting: ${String(process.env.ENABLE_MULTI_STEP || 'true').toLowerCase() === 'true' ? 'enabled' : 'disabled'}`);
+  console.log(`[chat] LLM Provider: ${process.env.LLM_PROVIDER || 'perplexity'}`);
+  console.log(`[chat] Request ID: ${event.headers['x-request-id'] || 'unknown'}-${Date.now()}`);
+  
 
   
   // Constants for metrics used in breakdown template
@@ -1125,14 +1164,44 @@ TEMPLATE OUTPUT:\n${templateText}`;
       systemPrompt = `You are Riskill, a financial data analysis assistant. Answer the question using ONLY the data provided below. If you cannot answer the question with the provided data, say "I don't have that information available." DO NOT make up any data or statistics that are not provided.\n
 BIGQUERY DATA:\n${resultsText}`;
       
-      // Call LLM provider
-      responseText = await callLLMProvider(message, systemPrompt, history || []);
+      // Call LLM provider using multi-step prompting
+      try {
+        console.log('[chat] Using multi-step prompting with BigQuery data');
+        const enableMultiStep = String(process.env.ENABLE_MULTI_STEP || 'true').toLowerCase() === 'true';
+        
+        if (enableMultiStep) {
+          responseText = await generateMultiStepResponse(
+            message,
+            systemPrompt,
+            bigQueryData,
+            history || [],
+            domain
+          );
+        } else {
+          // Fallback to single-step if multi-step is disabled
+          responseText = await callLLMProvider(message, systemPrompt, history || [], bigQueryData, domain);
+        }
+      } catch (error) {
+        console.error('[chat] Error in LLM processing with BigQuery data:', error);
+        // Graceful error handling
+        responseText = `I encountered a technical issue while processing your request. Please try again or contact support if the problem persists.\n\nError details: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        provenanceTag = 'ERROR_LLM_PROCESSING';
+      }
     } else {
       // Generic prompt when no grounding
       systemPrompt = `You are Riskill, a financial data analysis assistant. Answer questions about financial KPIs and business metrics. If you don't know the answer, say "I don't have that information available." DO NOT make up data.`;
       
-      // Call LLM provider
-      responseText = await callLLMProvider(message, systemPrompt, history || []);
+      // Call LLM provider - simplified approach for generic queries without grounding data
+      try {
+        console.log('[chat] Using single-step prompting for generic query');
+        // For generic queries without data, multi-step isn't as useful, so use single-step by default
+        responseText = await callLLMProvider(message, systemPrompt, history || [], null, domain, 'reasoning');
+      } catch (error) {
+        console.error('[chat] Error in LLM processing generic query:', error);
+        // Graceful error handling
+        responseText = `I encountered a technical issue while processing your request. Please try again or contact support if the problem persists.\n\nError details: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        provenanceTag = 'ERROR_LLM_PROCESSING';
+      }
     }
     
     // Extract widgets from template data if available
