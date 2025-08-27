@@ -1,14 +1,22 @@
 import { Handler } from '@netlify/functions';
-import { callLLMProvider, LLMStage } from '../../src/services/llmProvider.js';
-import { GroundingPayload } from '../../src/services/chatClient.js';
-import { routeMessage as domainRouteMessage } from '../../src/data/router/router.js';
-import { routeMessage as topicRouteMessage } from '../../src/data/router/topicRouter.js';
-import { runTemplate, hasPayload, isLiveRun } from '../../src/data/templates.js';
-import { rewriteMessage } from '../../src/services/semanticRewrite.js';
-import { enrichBusinessUnitData, synthesizeBuImportanceResponse } from '../../src/services/buEnrichment.js';
-import { unitLabel } from '../../src/data/labels.js';
-import { getDataMode, allowMockFallback } from '../../src/lib/dataMode.js';
-import { makeBQ } from '../../src/lib/bq.js';
+import { callLLMProvider, LLMStage } from '../../src/services/llmProvider';
+import { GroundingPayload, ProvenanceLite } from '../../src/services/chatClient';
+import { routeMessage as domainRouteMessage } from '../../src/data/router/router';
+import { routeMessage as topicRouteMessage } from '../../src/data/router/topicRouter';
+import { runTemplate, hasPayload, isLiveRun, Provenance } from '../../src/data/templates';
+import { rewriteMessage } from '../../src/services/semanticRewrite';
+import { enrichBusinessUnitData, synthesizeBuImportanceResponse } from '../../src/services/buEnrichment';
+import { unitLabel } from '../../src/data/labels';
+import { getDataMode, allowMockFallback } from '../../src/lib/dataMode';
+import { makeBQ } from '../../src/lib/bq';
+
+// Helper set to parse boolean env vars consistently
+const envTrue = new Set(['1', 'true', 'yes', 'y']);
+
+// Parse environment flags once for consistent usage
+const ENABLE_MULTI_STEP = envTrue.has(String(process.env.ENABLE_MULTI_STEP || 'true').toLowerCase());
+const POLISH_NARRATIVE = envTrue.has(String(process.env.POLISH_NARRATIVE || 'true').toLowerCase());
+const NARRATIVE_MODE_LLM = process.env.NARRATIVE_MODE === 'llm';
 
 // Broad greeting/help detector used for server-side fallback
 const GREET_RE = /\b(hi|hello|hey|yo|howdy|greetings|good\s+(morning|afternoon|evening)|help|start|get(ting)?\s+started|what\s+can\s+you\s+do)\b/i;
@@ -964,10 +972,10 @@ const handler: Handler = async (event) => {
                   widgets: [],
                   meta: { groundingType: "template" },
                   provenance: { 
-                    source: "bq", 
+                    source: "bq" as const, 
                     tag: bqReady.ok ? "NO_DATA_ENRICHMENT" : "BQ_ERROR_ENRICHMENT",
                     error_msg: bqReady.ok ? undefined : (bqReady.error || "BigQuery connection error") 
-                  }
+                  } as Provenance
                 };
                 
                 if (Array.isArray(templateData.templateOutput)) {
@@ -1027,7 +1035,7 @@ const handler: Handler = async (event) => {
                   text: synthesizedResponse,
                   context_enriched: true,
                   meta: { groundingType: "template" },
-                  provenance: { source: "mock", tag: "MOCK_DATA_ENRICHMENT" }
+                  provenance: { source: "mock" as const, tag: "MOCK_DATA_ENRICHMENT" } as Provenance
                 };
                 
                 if (Array.isArray(templateData.templateOutput)) {
@@ -1159,9 +1167,8 @@ const handler: Handler = async (event) => {
         // Decide if we should polish based on list-only gating and env flags
         const listOnly = isListOnly(widgets);
         const hasKpis = kpisOut.length > 0;
-        const llmModeOn = process.env.NARRATIVE_MODE === 'llm';
-        const polishEnvOn = String(process.env.POLISH_NARRATIVE ?? 'true').toLowerCase() !== 'false';
-        let polishAllowed = llmModeOn && polishEnvOn && !!process.env.PERPLEXITY_API_KEY;
+        // Use pre-parsed flags for clarity and consistency
+        let polishAllowed = NARRATIVE_MODE_LLM && POLISH_NARRATIVE && !!process.env.PERPLEXITY_API_KEY;
         if (listOnly && !hasKpis) polishAllowed = false;
 
         // Keep concise one-liner if list-only and no text
@@ -1194,31 +1201,30 @@ const handler: Handler = async (event) => {
         systemPrompt = `You are Riskill, a financial data analysis assistant. Answer the question using ONLY the data and text provided below. If you cannot answer the question with the provided data, say "I don't have that information available." DO NOT make up any data or statistics that are not provided.\n
 KPI SUMMARY:\n${kpiSummary || 'No KPI summary available.'}\n
 TEMPLATE OUTPUT:\n${templateText}`;
-        
-        // Strict gate: only synthesize when live BigQuery with successful template payload
-        try {
-          const msFlag = String(process.env.ENABLE_MULTI_STEP || 'true').toLowerCase();
-          const enableMultiStep = (msFlag === 'true' || msFlag === '1');
-          const liveOk = isLiveRun({ provenance: (groundingData as any)?.provenance } as any);
-          const payloadOk = hasPayload(templateOutput as any);
-          const gateOk = enableMultiStep && liveOk && payloadOk;
-          console.log('[chat] synthesis gate', { enableMultiStep, liveOk, payloadOk, gateOk });
+    
+    // Strict gate: only synthesize when live BigQuery with successful template payload
+    try {
+      // Use pre-parsed flag instead of parsing on every request
+      const liveOk = isLiveRun({ provenance: groundingData?.provenance as Provenance });
+      const payloadOk = hasPayload(templateOutput as any);
+      const gateOk = ENABLE_MULTI_STEP && liveOk && payloadOk;
+      console.log('[chat] synthesis gate', { ENABLE_MULTI_STEP, liveOk, payloadOk, gateOk });
 
-          if (gateOk) {
-            responseText = await generateMultiStepResponse(
-              message,
-              systemPrompt,
-              templateOutput,
-              history || [],
-              domain
-            );
-            provenanceTag = 'LLM_SYNTHESIS_V1';
-            groundingType = 'synthesis';
-          } else {
-            // Deterministic: return template text unchanged
-            responseText = templateText;
-            provenanceTag = provenanceTag || 'LLM_SKIPPED_GATE';
-          }
+      if (gateOk) {
+        responseText = await generateMultiStepResponse(
+          message,
+          systemPrompt,
+          templateOutput,
+          history || [],
+          domain
+        );
+        provenanceTag = 'LLM_SYNTHESIS_V1';
+        groundingType = 'synthesis';
+      } else {
+        // Deterministic: return template text unchanged
+        responseText = templateText;
+        provenanceTag = provenanceTag || 'LLM_SKIPPED_GATE';
+      }
         } catch (error) {
           console.error('[chat] Error in LLM processing:', error);
           // On synthesis error, return deterministic template output
@@ -1235,9 +1241,9 @@ BIGQUERY DATA:\n${resultsText}`;
       // Call LLM provider using multi-step prompting
       try {
         console.log('[chat] Using multi-step prompting with BigQuery data');
-        const enableMultiStep = String(process.env.ENABLE_MULTI_STEP || 'true').toLowerCase() === 'true';
+        // Use pre-parsed flag
         
-        if (enableMultiStep) {
+        if (ENABLE_MULTI_STEP) {
           responseText = await generateMultiStepResponse(
             message,
             systemPrompt,
