@@ -8,7 +8,7 @@ import { rewriteMessage } from '../../src/services/semanticRewrite.js';
 import { enrichBusinessUnitData, synthesizeBuImportanceResponse } from '../../src/services/buEnrichment.js';
 import { unitLabel } from '../../src/data/labels.js';
 import { getDataMode, allowMockFallback } from '../../src/lib/dataMode.js';
-import { makeBQ, runBQOrReport } from '../../src/lib/bq.js';
+import { makeBQ } from '../../src/lib/bq.js';
 
 // Broad greeting/help detector used for server-side fallback
 const GREET_RE = /\b(hi|hello|hey|yo|howdy|greetings|good\s+(morning|afternoon|evening)|help|start|get(ting)?\s+started|what\s+can\s+you\s+do)\b/i;
@@ -394,7 +394,7 @@ const handler: Handler = async (event) => {
   
   // Initialize BigQuery client with improved error handling
   let bq: ReturnType<typeof makeBQ> | null = null;
-  let bqReady = { ok: false, reason: "UNINIT" };
+  let bqReady: { ok: boolean; reason: string; error?: string } = { ok: false, reason: "UNINIT" };
   
   try {
     bq = makeBQ();                         // uses readServiceAccount()
@@ -461,7 +461,7 @@ const handler: Handler = async (event) => {
   if (missingVars.length > 0) {
     console.error(`[ERROR] Missing required environment variables: ${missingVars.join(', ')}`);
     return {
-      statusCode: 503,
+      statusCode: 200,
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
@@ -475,18 +475,19 @@ const handler: Handler = async (event) => {
         details: `Missing environment variables: ${missingVars.join(', ')}`,
         provenance: {
           platform: 'netlify',
-          fn_dir: 'netlify/functions'
+          fn_dir: 'netlify/functions',
+          tag: 'MISSING_ENV'
         }
       })
     };
   }
 
   // Validate provider only when required
-  const provider = process.env.LLM_PROVIDER;
+  const provider = process.env.LLM_PROVIDER || process.env.PROVIDER;
   if ((dataMode === 'live' || polishing) && provider !== 'perplexity') {
     console.error(`[ERROR] Unsupported provider: ${provider}`);
     return {
-      statusCode: 503,
+      statusCode: 200,
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
@@ -494,17 +495,26 @@ const handler: Handler = async (event) => {
         'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
       },
       body: JSON.stringify({ 
-        mode: 'no_data',
-        text: 'Missing message parameter',
-        widgets: [],
-        meta: { groundingType: 'error' },
-        provenance: { source: 'error', tag: 'MISSING_MESSAGE' }
+        mode: 'nodata',
+        reason: 'unsupported_provider',
+        text: 'Configured LLM provider is not supported in this environment.',
+        provenance: { platform: 'netlify', fn_dir: 'netlify/functions', tag: 'PROVIDER_UNSUPPORTED', provider }
       })
     };
   }
 
-  const requestBody = event.body ? JSON.parse(event.body) : {};
-  const message = requestBody.message;
+  const requestBody: Partial<ChatRequest> = event.body ? JSON.parse(event.body) : {} as any;
+  const message = (requestBody as any).message as string | undefined;
+  const grounding = requestBody.grounding as GroundingPayload | undefined;
+  const incomingRouter = requestBody.router as { domain?: string; confidence?: number } | undefined;
+  const incomingParams = requestBody.params as Record<string, any> | undefined;
+  const clientHints = requestBody.client_hints as { prevDomain?: string | null; prevTemplate?: string | null; prevParams?: Record<string, any> | null; prevTop?: number | null; prevDetail?: number | null } | undefined;
+  const templateIdFromBody = typeof requestBody.template === 'string' 
+    ? requestBody.template 
+    : (requestBody.template && typeof requestBody.template === 'object' 
+      ? (requestBody.template as any).id 
+      : undefined);
+  const history: Array<{role: 'user' | 'assistant'; content: string}> = Array.isArray(requestBody.history) ? (requestBody.history as any) : [];
   
   if (!message) {
       return {
