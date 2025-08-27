@@ -4,17 +4,53 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getCache, generateStableHash } from '../src/lib/cache';
 
-// Initialize BigQuery client
-const bigquery = new BigQuery();
+// Initialize BigQuery client with proper credentials
+let bigQueryOptions = {};
+
+// If inline credentials JSON is provided, use it
+if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+  try {
+    // Check if it's base64 encoded
+    const credJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+    let credentials;
+    
+    // Try to parse as JSON first
+    try {
+      credentials = JSON.parse(credJson);
+    } catch {
+      // If not valid JSON, try to decode from base64
+      try {
+        const decoded = Buffer.from(credJson, 'base64').toString('utf8');
+        credentials = JSON.parse(decoded);
+      } catch (e) {
+        console.error('Failed to parse credentials from base64:', e);
+        throw new Error('Invalid credentials format');
+      }
+    }
+    
+    bigQueryOptions = { credentials };
+    console.log('Using inline BigQuery credentials from environment');
+  } catch (error) {
+    console.error('Error setting up inline BigQuery credentials:', error);
+  }
+}
+
+// If project ID is specified, include it in the options
+if (process.env.GOOGLE_PROJECT_ID) {
+  bigQueryOptions = { ...bigQueryOptions, projectId: process.env.GOOGLE_PROJECT_ID };
+  console.log(`Using project ID: ${process.env.GOOGLE_PROJECT_ID}`);
+}
+
+const bigquery = new BigQuery(bigQueryOptions);
 
 // Check data mode: 'bq' or 'mock'
 const dataMode = (process.env.DATA_MODE || 'mock').toLowerCase();
 
 // Mock data fallback is now deprecated
 // We'll always return clear errors when data is unavailable instead of showing mock data
-const allowMockFallback = false;
 
 // Define allowed templates with optional parameter validation
+// Used for validation in SQL query execution
 const ALLOWED_TEMPLATES = [
   'metric_snapshot_year_v1',
   'metric_timeseries_v1',
@@ -215,6 +251,20 @@ const handler: Handler = async (event) => {
     // Parse request body
     const body: BigQueryRequest = JSON.parse(event.body || '{}');
     const { template_id, params = {} } = body;
+    
+    // Validate template_id against allowed templates
+    if (template_id && !ALLOWED_TEMPLATES.includes(template_id)) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          success: false,
+          diagnostics: {
+            message: `Invalid template_id: ${template_id}. Must be one of: ${ALLOWED_TEMPLATES.join(', ')}`
+          }
+        })
+      };
+    }
     
     // Check if we're in BigQuery mode or forced mock mode
     const useMockData = dataMode !== 'bq' && dataMode !== 'live';

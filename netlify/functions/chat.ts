@@ -5,8 +5,10 @@ import { routeMessage as domainRouteMessage } from '../../src/data/router/router
 import { routeMessage as topicRouteMessage } from '../../src/data/router/topicRouter';
 import { runTemplate } from '../../src/data/templates';
 import { rewriteMessage } from '../../src/services/semanticRewrite';
-import { unitLabel } from '../../src/data/labels';
 import { enrichBusinessUnitData, synthesizeBuImportanceResponse } from '../../src/services/buEnrichment';
+import { unitLabel } from '../../src/data/labels';
+import { getDataMode, allowMockFallback } from '../../src/lib/dataMode';
+import { makeBQ, runBQOrReport } from '../../src/lib/bq';
 
 // Broad greeting/help detector used for server-side fallback
 const GREET_RE = /\b(hi|hello|hey|yo|howdy|greetings|good\s+(morning|afternoon|evening)|help|start|get(ting)?\s+started|what\s+can\s+you\s+do)\b/i;
@@ -159,13 +161,24 @@ const handler: Handler = async (event) => {
     };
   }
   
-  // Check which data mode we're in (mock or live/bq). Default to mock for Stage-A.
+  // Get normalized data mode using helper
+  const dataMode = getDataMode(); // 'mock' | 'live'
   const rawDataMode = String(process.env.DATA_MODE || 'mock').toLowerCase();
-  const dataMode: DataMode = (rawDataMode === 'mock' ? 'mock' : 'live');
-  console.log(`[Netlify] Raw DATA_MODE from env: ${rawDataMode}`);
+  const strictLive = dataMode === 'live' && !allowMockFallback();
   const polishing = String(process.env.POLISH_NARRATIVE || 'false').toLowerCase() === 'true';
-  const allowMockFallback = String(process.env.ALLOW_MOCK_FALLBACK || 'true').toLowerCase() !== 'false';
-  console.log(`[Netlify] Using data mode: ${dataMode} | polishing=${polishing} | allowMockFallback=${allowMockFallback}`);
+  
+  // Initialize BigQuery client
+  const bq = makeBQ();
+  let bqReady: { ok: boolean; error?: string } = { ok: false };
+  try {
+    bqReady = await bq.ready();
+  } catch (e) {
+    console.error('[ERROR] Failed to initialize BigQuery:', e);
+    bqReady.error = String(e);
+  }
+
+  console.log(`[chat] mode=${dataMode} strict=${strictLive} bqReady=${bqReady.ok} raw=${rawDataMode} polishing=${polishing}`);
+
   
   // Constants for metrics used in breakdown template
   const METRIC_OPTIONS = [
@@ -587,7 +600,9 @@ const handler: Handler = async (event) => {
         const templateData = await runTemplate(domainTemplate, params ?? null);
 
         // Labelize list widgets coming from templates (exec-friendly)
-        const labeledWidgets = labelizeWidgets(templateData.templateOutput?.widgets);
+        if (templateData.templateOutput?.widgets) {
+          templateData.templateOutput.widgets = labelizeWidgets(templateData.templateOutput.widgets);
+        }
 
         // Handle business unit importance ranking with enrichment
         if (domainTemplate === 'business_units_ranking_v1' && templateData.templateOutput) {
@@ -648,8 +663,36 @@ const handler: Handler = async (event) => {
               
               console.log(`[INFO] Successfully enriched business unit data with ${contextRequest} context`);
             } else {
-              // Mock data for demo mode when original data is missing
-              if (dataMode === 'mock') {
+              // No data was available from BigQuery
+              
+              if (dataMode === 'live') {
+                // In live mode, always return an honest no_data response
+                console.log('[INFO] Live mode - returning honest no_data response with context');
+                
+                // Create a more informative no-data response that explains data limitations
+                const noDataResponse = {
+                  text: "The requested business unit data is unavailable. This may be because the data is not in the current backup file provided, which is limited to specific business metrics and time periods. The backup file we're working with may not contain this specific information.",
+                  widgets: [],
+                  meta: { groundingType: "template" },
+                  provenance: { 
+                    source: "bq", 
+                    tag: bqReady.ok ? "NO_DATA_ENRICHMENT" : "BQ_ERROR_ENRICHMENT",
+                    error_msg: bqReady.ok ? undefined : (bqReady.error || "BigQuery connection error") 
+                  }
+                };
+                
+                if (Array.isArray(templateData.templateOutput)) {
+                  templateData.templateOutput = noDataResponse;
+                } else if (templateData.templateOutput) {
+                  // Update the existing output with no_data response
+                  Object.assign(templateData.templateOutput, noDataResponse);
+                }
+                
+                // Also add provenance at the template result level
+                templateData.provenance = { ...noDataResponse.provenance };
+              }
+              // Only generate mock data in explicit mock mode
+              else if (dataMode === 'mock') {
                 console.log('[INFO] Generating mock business unit data for enrichment');
                 
                 // Create minimal mock data structure for enrichment
@@ -689,19 +732,23 @@ const handler: Handler = async (event) => {
                 const enrichedData = await enrichBusinessUnitData(mockBuData, metric, contextRequest);
                 const synthesizedResponse = await synthesizeBuImportanceResponse(enrichedData, metric, contextRequest);
                 
-                // Use the enriched mock data
+                // Use the enriched mock data with clear provenance marking
+                const mockResponse = {
+                  data: enrichedData, 
+                  text: synthesizedResponse,
+                  context_enriched: true,
+                  meta: { groundingType: "template" },
+                  provenance: { source: "mock", tag: "MOCK_DATA_ENRICHMENT" }
+                };
+                
                 if (Array.isArray(templateData.templateOutput)) {
-                  templateData.templateOutput = { 
-                    data: enrichedData, 
-                    text: synthesizedResponse,
-                    context_enriched: true 
-                  } as TemplateOutput;
-                } else {
-                  const output = templateData.templateOutput as TemplateOutput;
-                  output.data = enrichedData;
-                  output.text = synthesizedResponse;
-                  output.context_enriched = true;
+                  templateData.templateOutput = mockResponse as TemplateOutput;
+                } else if (templateData.templateOutput) {
+                  Object.assign(templateData.templateOutput, mockResponse);
                 }
+                
+                // Also add provenance at the template result level
+                templateData.provenance = { ...mockResponse.provenance };
                 
                 console.log(`[INFO] Successfully created mock business unit data with ${contextRequest} context`);
               } else {
