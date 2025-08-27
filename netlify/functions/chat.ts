@@ -8,7 +8,7 @@ import { rewriteMessage } from '../../src/services/semanticRewrite';
 import { enrichBusinessUnitData, synthesizeBuImportanceResponse } from '../../src/services/buEnrichment';
 import { unitLabel } from '../../src/data/labels';
 import { getDataMode, allowMockFallback } from '../../src/lib/dataMode';
-import { makeBQ, runBQOrReport } from '../../src/lib/bq';
+import { makeBQ } from '../../src/lib/bq';
 
 // Broad greeting/help detector used for server-side fallback
 const GREET_RE = /\b(hi|hello|hey|yo|howdy|greetings|good\s+(morning|afternoon|evening)|help|start|get(ting)?\s+started|what\s+can\s+you\s+do)\b/i;
@@ -593,7 +593,7 @@ const handler: Handler = async (event) => {
     }
     
     // If we're in mock mode or (live mode with mock fallback allowed), try template
-    if (((dataMode === 'live' && allowMockFallback) || dataMode === 'mock') && !groundingData && domainTemplate && (typeof routeResult.confidence !== 'number' || routeResult.confidence >= 0.3)) {
+    if (((dataMode === 'live' && allowMockFallback()) || dataMode === 'mock') && !groundingData && domainTemplate && (typeof routeResult.confidence !== 'number' || routeResult.confidence >= 0.3)) {
       try {
         console.info(`[Netlify] Generating grounding data (fallback) for: ${domainTemplate}`);
         const templateData = await runTemplate(domainTemplate, params ?? null);
