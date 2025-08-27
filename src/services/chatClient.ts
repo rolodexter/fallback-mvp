@@ -15,6 +15,15 @@ export type ChatResponse = {
   error?: string;
 };
 
+export type ProvenanceLite = {
+  source: 'bq' | 'mock';
+  tag?: string;
+  template?: string;
+  domain?: string;
+  ms?: number;
+  [k: string]: any;
+};
+
 export type GroundingPayload = {
   domain: string | null;
   confidence: number;
@@ -25,7 +34,7 @@ export type GroundingPayload = {
   templateOutput?: any;
   bigQueryData?: any[] | null;
   // Server-attached provenance for centralized tagging/gating
-  provenance?: any;
+  provenance?: ProvenanceLite;
 };
 
 // Short chat history item for live/LLM to understand follow-ups
