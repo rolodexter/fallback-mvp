@@ -13,8 +13,7 @@ import { makeBQ, runBQOrReport } from '../../src/lib/bq';
 // Broad greeting/help detector used for server-side fallback
 const GREET_RE = /\b(hi|hello|hey|yo|howdy|greetings|good\s+(morning|afternoon|evening)|help|start|get(ting)?\s+started|what\s+can\s+you\s+do)\b/i;
 
-// Supported data modes
-type DataMode = 'mock' | 'live';
+// Using DataMode from dataMode.ts import
 
 // Extended template result with additional metadata fields
 interface ExtendedTemplateResult {
