@@ -1,40 +1,22 @@
-/**
- * Placeholder fill and numeric guard for consultant briefs
- * Ensures deterministic values only in narrative text
- */
-import { FactsPack } from './facts';
+// src/lib/narrative/fill.ts
+import type { FactsPack } from "./facts";
 
-/**
- * Fills placeholders in a skeleton text with values from FactsPack
- * Simple string replacement for templating
- */
-export function fillPlaceholders(skeleton: string, facts: FactsPack): string {
-  let filled = skeleton;
-  
-  // Create a mapping of all fact values for replacement
-  const replacements: Record<string, string> = {};
-  
-  // Flatten the facts object for simple replacement
-  function flattenObject(obj: any, prefix = '') {
-    for (const key in obj) {
-      if (obj[key] !== null && typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
-        flattenObject(obj[key], `${prefix}${key}.`);
-      } else if (!Array.isArray(obj[key])) {
-        const value = obj[key];
-        replacements[`{${prefix}${key}}`] = value !== undefined && value !== null ? String(value) : '{n/a}';
-      }
-    }
-  }
-  
-  // Add basic facts as replacements
-  flattenObject(facts);
-  
-  // Special handling for arrays like topk
+export function fillPlaceholders(skel: string, f: FactsPack): string {
+  const dict: Record<string, string> = {
+    "{metric}": f.metric ?? "metric",
+    "{period_label}": f.period_label,
+    "{direction}": f.direction ?? "flat",
+    "{yoY}": f.yoY == null ? "n/a" : pct(f.yoY),
+    "{topk[0].name}": f.topk?.[0]?.name ?? "n/a",
+    "{topk[0].value}": f.topk?.[0]?.value != null ? fmtNum(f.topk[0].value) : "n/a",
+    "{concentration.top3}": f.concentration?.top3 != null ? pct(f.concentration.top3) : "n/a",
+  };
+  let out = skel;
+  for (const [k, v] of Object.entries(dict)) out = out.split(k).join(v);
+  return out;
 }
 
-/**
- * Extracts all numeric tokens from text
- */
+// Extract numeric tokens in a string.
 function extractNumbers(text: string): string[] {
   const m = text.match(/[-+]?\d[\d,]*(?:\.\d+)?%/g) || [];
   const m2 = text.match(/[-+]?\d[\d,]*(?:\.\d+)?/g) || [];
@@ -62,28 +44,19 @@ function whitelistFromFacts(f: FactsPack): Set<string> {
   return s;
 }
 
-/**
- * Guards against new numbers in polished narrative
- * Ensures all numeric values came from facts or standard values
- */
-export function guardNoNewNumbers(text: string, facts: FactsPack): boolean {
-  // Extract all numbers from the text
-  const textNumbers = extractNumbers(text);
-  
-  // Generate whitelist of allowed numbers
-  const whitelist = generateNumberWhitelist(facts);
-  
-  // Check if all numbers in text are in the whitelist
-  for (const num of textNumbers) {
-    // Skip common safe patterns
-    if (num === '0' || num === '1' || num === '2' || num === '3' || num === '100%') continue;
-    
-    // Check against whitelist
-    if (!whitelist.has(num)) {
-      console.warn(`[guard] Rejected non-whitelisted number: ${num}`);
-      return false;
-    }
-  }
-  
-  return true;
+/** Returns true if no new numbers were introduced (i.e., every number in text is whitelisted). */
+export function guardNoNewNumbers(text: string, f: FactsPack): boolean {
+  const nums = extractNumbers(text);
+  if (!nums.length) return true;
+  const wl = whitelistFromFacts(f);
+  return nums.every(n => wl.has(n));
+}
+
+function fmtNum(n: number): string {
+  return n.toLocaleString();
+}
+function pct(p: number): string {
+  const val = Math.abs(p) <= 1 ? p * 100 : p;
+  const sign = p > 0 ? "+" : p < 0 ? "−" : "";
+  return `${sign}${Math.abs(val).toFixed(2)}%`;
 }
