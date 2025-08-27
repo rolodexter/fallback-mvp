@@ -24,6 +24,8 @@ export type GroundingPayload = {
   // Server may attach structured template output (text + widgets)
   templateOutput?: any;
   bigQueryData?: any[] | null;
+  // Server-attached provenance for centralized tagging/gating
+  provenance?: any;
 };
 
 // Short chat history item for live/LLM to understand follow-ups

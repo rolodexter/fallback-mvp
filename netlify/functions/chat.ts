@@ -3,7 +3,7 @@ import { callLLMProvider, LLMStage } from '../../src/services/llmProvider.js';
 import { GroundingPayload } from '../../src/services/chatClient.js';
 import { routeMessage as domainRouteMessage } from '../../src/data/router/router.js';
 import { routeMessage as topicRouteMessage } from '../../src/data/router/topicRouter.js';
-import { runTemplate } from '../../src/data/templates.js';
+import { runTemplate, hasPayload, isLiveRun } from '../../src/data/templates.js';
 import { rewriteMessage } from '../../src/services/semanticRewrite.js';
 import { enrichBusinessUnitData, synthesizeBuImportanceResponse } from '../../src/services/buEnrichment.js';
 import { unitLabel } from '../../src/data/labels.js';
@@ -873,7 +873,8 @@ const handler: Handler = async (event) => {
           confidence: (typeof routeResult.confidence === 'number' ? routeResult.confidence : 0.9),
           kpiSummary: templateData.kpiSummary || null,
           templateOutput: primaryTypedOutput ? { ...primaryTypedOutput, widgets: primaryLabeledWidgets ?? primaryTypedOutput.widgets } : null,
-          groundingType: 'template'
+          groundingType: 'template',
+          provenance: templateData?.provenance
         };
       } catch (err) {
         console.error(`[ERROR] Failed to generate grounding data:`, err);
@@ -1061,7 +1062,8 @@ const handler: Handler = async (event) => {
           kpiSummary: templateData.kpiSummary || null,
           templateOutput: fallbackTypedOutput ? { ...fallbackTypedOutput, widgets: fallbackLabeledWidgets ?? fallbackTypedOutput.widgets } : null,
           groundingType: 'drilldown',
-          bigQueryData: null
+          bigQueryData: null,
+          provenance: templateData?.provenance
         };
       } catch (err) {
         console.error(`[ERROR] Failed to generate grounding data:`, err);
@@ -1120,7 +1122,7 @@ const handler: Handler = async (event) => {
     const bigQueryData = groundingData.bigQueryData || null;
     const templateOutput = groundingData.templateOutput || null;
     const kpiSummary = groundingData.kpiSummary || null;
-    const groundingType = groundingData.groundingType;
+    let groundingType = groundingData.groundingType;
     
     console.log(`Using domain: ${domain}, Grounding type: ${groundingType}`);
     
@@ -1193,12 +1195,15 @@ const handler: Handler = async (event) => {
 KPI SUMMARY:\n${kpiSummary || 'No KPI summary available.'}\n
 TEMPLATE OUTPUT:\n${templateText}`;
         
-        // Call LLM provider using multi-step prompting
+        // Strict gate: only synthesize when live BigQuery with successful template payload
         try {
-          console.log('[chat] Using multi-step prompting with template data');
           const enableMultiStep = String(process.env.ENABLE_MULTI_STEP || 'true').toLowerCase() === 'true';
-          
-          if (enableMultiStep) {
+          const liveOk = isLiveRun({ provenance: (groundingData as any)?.provenance } as any);
+          const payloadOk = hasPayload(templateOutput as any);
+          const gateOk = enableMultiStep && liveOk && payloadOk;
+          console.log('[chat] synthesis gate', { enableMultiStep, liveOk, payloadOk, gateOk });
+
+          if (gateOk) {
             responseText = await generateMultiStepResponse(
               message,
               systemPrompt,
@@ -1206,15 +1211,18 @@ TEMPLATE OUTPUT:\n${templateText}`;
               history || [],
               domain
             );
+            provenanceTag = 'LLM_SYNTHESIS_V1';
+            groundingType = 'synthesis';
           } else {
-            // Fallback to single-step if multi-step is disabled
-            responseText = await callLLMProvider(message, systemPrompt, history || [], templateOutput, domain);
+            // Deterministic: return template text unchanged
+            responseText = templateText;
+            provenanceTag = provenanceTag || 'LLM_SKIPPED_GATE';
           }
         } catch (error) {
           console.error('[chat] Error in LLM processing:', error);
-          // Graceful error handling
-          responseText = `I encountered a technical issue while processing your request. Please try again or contact support if the problem persists.\n\nError details: ${error instanceof Error ? error.message : 'Unknown error'}`;
-          provenanceTag = 'ERROR_LLM_PROCESSING';
+          // On synthesis error, return deterministic template output
+          responseText = templateText;
+          provenanceTag = 'LLM_SKIPPED_ERROR';
         }
       }
     } else if (bigQueryData) {
