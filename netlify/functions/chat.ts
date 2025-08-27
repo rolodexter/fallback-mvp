@@ -15,6 +15,11 @@ const GREET_RE = /\b(hi|hello|hey|yo|howdy|greetings|good\s+(morning|afternoon|e
 
 // Using DataMode from dataMode.ts import
 
+// Helper to list missing env keys (trim-aware)
+function missingEnv(keys: string[]) {
+  return keys.filter(k => !String(process.env[k] || '').trim());
+}
+
 /**
  * Generate a response using multi-step prompting approach with Perplexity
  * @param message User message
@@ -448,42 +453,47 @@ const handler: Handler = async (event) => {
     { id: 'gross', label: 'Gross Profit' }
   ];
   
-  // Check for required environment variables (relaxed in mock unless polishing)
-  const requiredEnvVars: string[] = [];
-  if (dataMode === 'live' || polishing) {
-    requiredEnvVars.push('LLM_PROVIDER', 'PERPLEXITY_API_KEY');
-  }
+  // Live-mode gate: verify core BQ config and any credential form
   if (dataMode === 'live') {
-    requiredEnvVars.push('GOOGLE_APPLICATION_CREDENTIALS');
-  }
-  const missingVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
-  
-  if (missingVars.length > 0) {
-    console.error(`[ERROR] Missing required environment variables: ${missingVars.join(', ')}`);
-    return {
-      statusCode: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
-      },
-      body: JSON.stringify({ 
-        mode: 'nodata',
-        reason: 'missing_env',
-        text: 'Service unavailable due to missing environment configuration.',
-        details: `Missing environment variables: ${missingVars.join(', ')}`,
-        provenance: {
-          platform: 'netlify',
-          fn_dir: 'netlify/functions',
-          tag: 'MISSING_ENV'
-        }
-      })
-    };
+    // Minimal required keys for BigQuery client
+    const core = ['GOOGLE_PROJECT_ID'];
+    const missCore = missingEnv(core);
+    const hasCreds = Boolean(
+      (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || '').trim() ||
+      (process.env.GOOGLE_APPLICATION_CREDENTIALS_B64  || '').trim() ||
+      (process.env.GOOGLE_APPLICATION_CREDENTIALS      || '').trim()
+    );
+
+    if (missCore.length || !hasCreds) {
+      const missing_env = [...missCore, ...(hasCreds ? [] : ['CREDENTIALS'])];
+      console.error(`[ERROR] Missing live env: ${missing_env.join(', ')}`);
+      return {
+        statusCode: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+        },
+        body: JSON.stringify({
+          mode: 'no_data',
+          reason: 'missing_env',
+          text: 'Service unavailable due to missing environment configuration.',
+          widgets: [],
+          meta: { groundingType: 'template' },
+          provenance: {
+            source: 'bq',
+            tag: 'MISSING_ENV',
+            reason: 'missing_env',
+            missing_env
+          }
+        })
+      };
+    }
   }
 
   // Validate provider only when required
-  const provider = process.env.LLM_PROVIDER || process.env.PROVIDER;
+  const provider = process.env.LLM_PROVIDER ?? process.env.PROVIDER ?? 'perplexity';
   if ((dataMode === 'live' || polishing) && provider !== 'perplexity') {
     console.error(`[ERROR] Unsupported provider: ${provider}`);
     return {
@@ -501,6 +511,36 @@ const handler: Handler = async (event) => {
         provenance: { platform: 'netlify', fn_dir: 'netlify/functions', tag: 'PROVIDER_UNSUPPORTED', provider }
       })
     };
+  }
+
+  // If provider is Perplexity and we're in live/polish path, ensure API key exists
+  if ((dataMode === 'live' || polishing) && provider === 'perplexity') {
+    const hasPplxKey = Boolean((process.env.PERPLEXITY_API_KEY || '').trim() || (process.env.PPLX_API_KEY || '').trim());
+    if (!hasPplxKey) {
+      console.error('[ERROR] Missing Perplexity API key');
+      return {
+        statusCode: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+        },
+        body: JSON.stringify({
+          mode: 'no_data',
+          reason: 'missing_env',
+          text: 'Perplexity API key not configured.',
+          widgets: [],
+          meta: { groundingType: 'template' },
+          provenance: {
+            source: 'llm',
+            tag: 'MISSING_ENV',
+            reason: 'missing_env',
+            missing_env: ['PERPLEXITY_API_KEY or PPLX_API_KEY']
+          }
+        })
+      };
+    }
   }
 
   const requestBody: Partial<ChatRequest> = event.body ? JSON.parse(event.body) : {} as any;
