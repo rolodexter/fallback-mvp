@@ -1005,12 +1005,13 @@ export const handler: Handler = async (event) => {
           responseText = templateText;
           provenanceTag = 'LLM_SYNTHESIS_ERROR';
         }
-      } catch (error) {
-        console.error('[chat] Error in LLM processing:', error);
-        // On synthesis error, return deterministic template output
-        responseText = templateText;
-        provenanceTag = 'LLM_SKIPPED_ERROR';
       }
+    } catch (error) {
+      console.error('[chat] Error in LLM processing:', error);
+      // On synthesis error, return deterministic template output
+      responseText = templateText;
+      provenanceTag = 'LLM_SKIPPED_ERROR';
+    }
     } else if (bigQueryData) {
       // Format BigQuery results for logging purposes
       console.log(`[BigQuery] Processing BigQuery data: ${bigQueryData ? 'found' : 'none'}`);
